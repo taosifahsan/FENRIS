@@ -1,0 +1,57 @@
+# ---- Quasilinear runtime scale ---------------------------------------------
+# eps_E multiplies the normalized QL tables generated from input_build.txt.
+eps_E    : 2.E1
+
+# Radial RF envelope, expressed as fractions of x_max.
+# cut_center >= 1 disables the envelope. For cut_center < 1,
+# smoothing_width = 0 gives a sharp Heaviside cutoff; positive width gives
+# 0.5*[1-tanh((x/x_max-cut_center)/smoothing_width)].
+cut_center : 1.0
+smoothing_width : 0.02
+
+# ---- Species units ----------------------------------------------------------
+# charge: e, mass: amu, temperature: keV
+
+# ---- Background / majority ions for collisions ------------------------------
+# n_bg is a composition ratio, not an absolute density. The solver normalizes
+# it to fractions internally, then uses quasineutrality for n_e/n_ref.
+
+z_bg      	    : 1.0 1.0
+m_bg      	    : 2.0 3.0
+n_bg      	    : 0.5 0.5
+T_bg      	    : 1.0 1.0
+logLambda_bg	: 17.0 17.0
+
+# ---- Electrons --------------------------------------------------------------
+# Electron density follows quasineutrality from background ions only;
+# electron mass/charge are fixed.
+# The minority normalization comes from tables/parameters.bin, generated from
+# input_build.txt, so the solver cannot accidentally use a different species.
+T_e             : 1.0
+logLambda_ea    : 17.0
+
+# ---- Simulation Params ----
+-dt             : 1E-2       # Size of Time steps
+-time           : 1E1        # Total Time
+-degree         : 2          # DG polynomial degree
+-start-levels	: 5 5
+-max-levels     : 5 5
+-grid           : sparse     # Simulation mode
+-solver         : gmres
+-precon         : none
+-adapt          : 1.E-8
+-isolve-tol     : 1.E-8
+-isolve-iter    : 400
+-isolve-inner   : 400
+
+# ---- velocity domain --------------------------------------------------------
+# Full x-space starts at 0; only the upper bound is configurable.
+x_max        : 20.0
+
+# ---- movie snapshots -------------------------------------------------------
+# These are full ASGarD HDF5 snapshots, so keep the frame count modest.
+# movie_frames chooses roughly this many frames including initial/final.
+# movie_stride overrides movie_frames when positive. Both 0 disables snapshots.
+movie_frames : 200
+movie_stride : 0
+movie_dir    : movie

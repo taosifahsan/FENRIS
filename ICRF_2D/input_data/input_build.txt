@@ -1,0 +1,39 @@
+# ============================================================================
+#  input_build.txt  --  all parameters for the quasilinear-coefficient pipeline
+#  Format:  key : value   ('#' starts a comment; blank lines ok)
+# ============================================================================
+
+# ---- Geometric Equilibrium (Solov'ev) ----
+R0       : 3.0
+eps      : 0.3
+kappa    : 1.6
+delta    : -0.3
+B0       : 2.0
+alpha    : 0.5
+psi      : 0.5          # normalized flux: 1 at O-point, 0 at separatrix
+
+# ---- Wave / particle physics -----------------------------------------------
+# Omega_s0 is computed from z_a, m_a, and B_min on this flux surface.
+# omega = omega_ratio * Omega_s0.
+# eta is a dimensionless RF-linewidth ratio: gamma = eta * omega.
+# eta = 0 retains the original exact delta-function root/Jacobian algorithm.
+
+omega_ratio : 1.02
+eta         : 1.E-5
+n_mode   : 1
+m_mode   : 2
+
+# ---- Table normalization ----------------------------------------------------
+# Units: charge e, mass amu, temperature keV, density 1e20 m^-3.
+# These define x=v/v_ta and the table scale Gamma0/vta^4.
+z_a      : 2.0
+m_a      : 3.0
+T_a      : 1.0
+logLambda_aa : 17.0
+n_ref    : 1.0
+
+# ---- Table grid (build_tables): x=v/vta and pitch only (psi is fixed above) ----
+# Full space is used: x starts at 0 and pitch spans 0..180 degrees.
+tab_Nx       : 4096
+tab_Npitch   : 4096
+tab_xmax     : 20.0

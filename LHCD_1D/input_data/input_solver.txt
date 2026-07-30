@@ -1,0 +1,29 @@
+cut_min       	: 2.0		# D_RF region start
+cut_max       	: 4.0		# D_RF region end
+cut_sharpness 	: 0.05		# D_RF smoothness
+cut_height    	: 0.5		# D_RF peak value
+
+domain_min    	: -8		# Domain start
+domain_max    	: +8		# Domain end
+time		: 2    	# Simulation time
+time_step	: 1E-2		# Size of Time steps (CN is unconditionally stable; adaptation cost is per step)
+
+-degree        	: 2		# DG polynomial degree
+-start-levels   : 8		# Sparse grid level (256 cells over -8..8)
+-max-levels     : 10		# Adaptivity ceiling (= start; the weight only prunes)
+-adapt          : 1.E-8		# Adaptive threshold, as in the 2D decks
+
+epsilon		: 1E-2		# Regularizer near 0
+inverse_min	: -6.0		# Regularizer near min
+inverse_max	: 6.0		# Regularizer near max
+
+num_points    	: 2048  	# Plot sample count
+plot_scale    	: semilogy	# Plot scale
+normalize     	: yes      	# Normalizing to 1
+
+# ---- movie snapshots -------------------------------------------------------
+# movie_frames chooses roughly this many frames including initial/final.
+# movie_stride overrides movie_frames when positive. Both 0 disables snapshots.
+movie_frames    : 100
+movie_stride    : 0
+movie_dir       : movie

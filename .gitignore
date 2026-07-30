@@ -1,0 +1,24 @@
+# Generated CMake and compiler artifacts
+**/build/
+**/build-*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/Makefile
+
+# Generated simulation and visualization outputs
+**/output_data/
+**/figures/
+**/logs/
+
+# Solver data files (snapshots, final states, coefficient tables)
+*.h5
+*.hdf5
+*.bin
+
+# Python
+**/__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store
