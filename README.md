@@ -24,9 +24,15 @@ PRETABULATION, ICRF_2D:
 For ICRF_2D, the bounce averaging dimension reduction technique requires pretabulation of
 coefficients to reduce runtime. Dependencies and staleness are set accordingly.
 
+SLURM:
+There is a submit.sh written in case users want to submit the code to Slurm. It wraps around
+run.sh and submits it for the slurm job. 
+
 COMMENTS: 
 The user can tweak run.sh to set how many CPUs will be used in different stages of
-the code. The solver parallelization is best utilized by setting open_mp threads to 2. For pretabulation
-or plot, speed is proportional to CPUs used.
+the code. The solver parallelization is best utilized by setting open_mp threads to 2.
+For pretabulation or plotting, speed is proportional to the number of CPUs used. When
+submitting to slurm, editing run.sh is sufficient when distributing thread count because
+submit.sh is a thin wrapper on run.sh.
 
 
