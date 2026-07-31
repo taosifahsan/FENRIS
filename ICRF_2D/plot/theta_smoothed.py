@@ -37,6 +37,12 @@ from vel_smoothed import FIGSIZE, derive, draw_frame
 
 
 def main():
+    """CLI entry point: parse flags, load the data, render the figures.
+
+    Giving neither ``--static`` nor ``--movie`` renders both -- that is how
+    tools/run.sh invokes every plotter; either flag narrows a manual run to
+    just that output.
+    """
     parser = argparse.ArgumentParser(description="ICRF pitch-marginal plots")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
@@ -57,6 +63,8 @@ def main():
         cache = load_snapshots(args.output, args.points)
     data = derive(cache)
 
+    # Bind the derived data into the (fig, ax, index) signature render_still
+    # and render_movie expect (closures are fine: rendering is in-process).
     def draw(fig, ax, index):
         draw_frame(fig, ax, data, "theta", index)
 

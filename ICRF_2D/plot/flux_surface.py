@@ -351,6 +351,7 @@ def plot_trajectory(build_input=None):
 
 
 def main():
+    """CLI entry point: render the static flux-surface figure (no movie)."""
     parser = argparse.ArgumentParser(description="ICRF flux surface plot")
     parser.add_argument("--fig-dir", default=str(PATHS.figures))
     parser.add_argument("--dpi", type=int, default=220)

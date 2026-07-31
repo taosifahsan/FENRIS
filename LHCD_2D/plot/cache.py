@@ -5,6 +5,8 @@ seconds, so it happens exactly once, here, and the result is saved to one
 ``.npz`` file.  The plotters that run.sh then launches in parallel load that
 file back in milliseconds via their ``--cache`` flag instead of each
 re-reading the snapshots.
+
+Used by: ``tools/run.sh`` (stage one, before the parallel plotters launch).
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from plot_common.reader import load_snapshots, save_cache
 
 
 def main():
+    """CLI entry point: reconstruct every snapshot once, write the .npz cache."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("-o", "--output", default=str(PATHS.snapshots))
     parser.add_argument("-n", "--points", type=int, default=192)

@@ -394,6 +394,7 @@ def drag_over_diffusion(solver_input=None, table_dir=None):
     C, ell, mu = collision_arrays(solver_input, table_dir)
 
     def ratio(xv):
+        """A/B at one speed; 0 at x <= 0, where the coefficients vanish."""
         if xv <= 0.0:
             return 0.0
         A = 0.0
@@ -520,9 +521,11 @@ def collisional_pitch_norm(solver_input=None, table_dir=None):
 
     # The 2*u factors are the Jacobian of theta = theta_turn -/+ u^2.
     def left_integrand(u):
+        """The mass element below the peak, in the clustered variable u."""
         return 2.0 * u * mass_theta(theta_turn - u * u)
 
     def right_integrand(u):
+        """The mass element above the peak, in the clustered variable u."""
         return 2.0 * u * mass_theta(theta_turn + u * u)
 
     norm = 2.0 * (
@@ -955,6 +958,7 @@ def plot_li(table_dir=None):
 
 
 def main():
+    """CLI entry point: render the three static coefficient figures (no movie)."""
     parser = argparse.ArgumentParser(description="ICRF coefficient plots")
     parser.add_argument("--fig-dir", default=str(PATHS.figures))
     parser.add_argument("--dpi", type=int, default=220)

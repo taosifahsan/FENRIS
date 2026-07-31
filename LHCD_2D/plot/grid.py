@@ -26,7 +26,7 @@ Used by: ``tools/run.sh`` (one of the parallel plotter processes).
 
 Depends on: :mod:`plot_common.reader` (``read_adaptive_grid``),
 :mod:`plot_common.static` (``level_contour``, ``line1d``),
-:mod:`plot_common.movie` (parallel frame rendering).
+:mod:`plot_common.movie` (movie rendering).
 """
 
 from __future__ import annotations
@@ -296,6 +296,12 @@ def plot_dof(data):
 # ---------------------------------------------------------------------------
 
 def main():
+    """CLI entry point: parse flags, load the data, render the figures.
+
+    Giving neither ``--static`` nor ``--movie`` renders both -- that is how
+    tools/run.sh invokes every plotter; either flag narrows a manual run to
+    just that output.
+    """
     parser = argparse.ArgumentParser(description="LHCD adaptive-grid plots")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
@@ -314,6 +320,8 @@ def main():
 
     data = load(args.output)
 
+    # Bind the derived data into the (fig, ax, index) signature render_still
+    # and render_movie expect (closures are fine: rendering is in-process).
     def draw(fig, ax, index):
         draw_level_frame(fig, ax, data["records"][index], index,
                          len(data["records"]), data["resolution"])

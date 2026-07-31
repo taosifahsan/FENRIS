@@ -7,17 +7,17 @@ pass:
   ``theta``  -- integrate out speed, giving a marginal versus pitch angle
                (degrees)
 
-The one physics difference from ``ICRF_2D/plot/smoothed.py``: LHCD's pitch
+The one physics difference from ``ICRF_2D/plot/vel_smoothed.py``: LHCD's pitch
 measure is plain ``sin(theta)``, because LHCD has no magnetic geometry and so
 no bounce-orbit weight.  Everything else -- the reduction machinery, the fixed
 y-limits, the drawing -- is the same idea.
 
 Used by: ``tools/run.sh`` (one of the parallel plotter processes), and
-``theta_smoothed.py``, which imports :func:`derive`, :func:`plot_static`,
-and :func:`plot_movie` from here and only picks the other reduction.
+``theta_smoothed.py``, which imports :func:`derive`, :func:`draw_frame`, and
+``FIGSIZE`` from here and only picks the other reduction.
 
 Depends on: :mod:`plot_common.reader` (the cache), :mod:`plot_common.static`
-(drawing), :mod:`plot_common.movie` (parallel frame rendering),
+(drawing), :mod:`plot_common.movie` (movie rendering),
 ``coefficients.py`` (the initial condition).  The grid-orientation and
 trapezoid-weight helpers are small enough to keep local to this file.
 """
@@ -238,6 +238,12 @@ def draw_frame(fig, ax, data, reduction, index):
 
 
 def main():
+    """CLI entry point: parse flags, load the data, render the figures.
+
+    Giving neither ``--static`` nor ``--movie`` renders both -- that is how
+    tools/run.sh invokes every plotter; either flag narrows a manual run to
+    just that output.
+    """
     parser = argparse.ArgumentParser(description="LHCD speed-marginal plots")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
@@ -258,6 +264,8 @@ def main():
         cache = load_snapshots(args.output, args.points)
     data = derive(cache)
 
+    # Bind the derived data into the (fig, ax, index) signature render_still
+    # and render_movie expect (closures are fine: rendering is in-process).
     def draw(fig, ax, index):
         draw_frame(fig, ax, data, "vel", index)
 

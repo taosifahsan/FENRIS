@@ -10,7 +10,7 @@ The encoder binary comes from imageio-ffmpeg (a pip-installed static build
 that always includes libx264), with a system ffmpeg as fallback.  A missing
 binary is reported *before* frames are rendered, not after.
 
-Used by: every plotter's ``plot_movie``.
+Used by: every plotter's ``main`` (the ``--movie`` half of its render step).
 """
 
 from __future__ import annotations

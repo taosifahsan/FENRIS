@@ -21,7 +21,7 @@ Used by: ``tools/run.sh`` (one of the parallel plotter processes), and
 Depends on: :mod:`plot_common.runtime` (bootstrap/paths),
 :mod:`plot_common.reader` (deck + the 1-D snapshot cache),
 :mod:`plot_common.static` (save_png), :mod:`plot_common.movie`
-(parallel frame rendering).
+(movie rendering).
 """
 
 from __future__ import annotations
@@ -101,6 +101,15 @@ class PlasmaData:
     """
 
     def __init__(self, K, z, m, z_ion, m_ion, n_ion, T_ion):
+        """Precompute per-species coefficient arrays from deck parameters.
+
+        ``K`` is the RF diffusion strength; ``z``/``m`` are the evolving
+        minority species' charge and mass; the ``*_ion`` vectors describe the
+        background ions.  Each species contributes one entry to ``l`` (its
+        inverse thermal speed in normalized units), ``eta_coeff``, and
+        ``beta_coeff``, so :meth:`eta` and :meth:`zeta` reduce to weighted
+        sums of the Chandrasekhar function over species.
+        """
         self.K = float(K)
         self.z = float(z)
         self.m = float(m)
@@ -132,11 +141,13 @@ class PlasmaData:
         self.beta_coeff[1:] = cf_i * l_i
 
     def eta(self, v):
+        """Drift coefficient: each species' G(l_s v) contribution, summed."""
         v = np.asarray(v, dtype=float)
         x = self.l[:, None] * v[None, :]
         return np.sum(self.eta_coeff[:, None] * chandrasekhar_g(x, False), axis=0)
 
     def zeta(self, v):
+        """Diffusion coefficient: summed collisional beta/2, plus RF power K."""
         v = np.asarray(v, dtype=float)
         x = self.l[:, None] * v[None, :]
         beta = np.sum(self.beta_coeff[:, None] * chandrasekhar_g(x, True), axis=0)
@@ -265,6 +276,12 @@ def draw_solution_frame(fig, ax, data, index):
 
 
 def main():
+    """CLI entry point: parse flags, load the data, render the figures.
+
+    Giving neither ``--static`` nor ``--movie`` renders both -- that is how
+    tools/run.sh invokes every plotter; either flag narrows a manual run to
+    just that output.
+    """
     parser = argparse.ArgumentParser(description="ICRF_1D solution plots")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
@@ -290,6 +307,8 @@ def main():
         cache = load_snapshots_1d(args.output, points)
     data = derive(cache)
 
+    # Bind the derived data into the (fig, ax, index) signature render_still
+    # and render_movie expect (closures are fine: rendering is in-process).
     def draw(fig, ax, index):
         draw_solution_frame(fig, ax, data, index)
 

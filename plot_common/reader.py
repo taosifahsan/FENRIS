@@ -412,6 +412,7 @@ class SnapshotCache:
     points: int
 
     def __len__(self):
+        """Number of frames."""
         return len(self.frames)
 
     @property
@@ -621,6 +622,7 @@ class SnapshotCache1D:
     points: int
 
     def __len__(self):
+        """Number of frames."""
         return len(self.frames)
 
 

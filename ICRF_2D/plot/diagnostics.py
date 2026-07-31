@@ -161,6 +161,12 @@ def _growth_frames(cache, floor):
 
 
 def _growth(cache, floor):
+    """Growth pipeline: raw per-pair rates -> rolling average -> time mean.
+
+    Also fixes one movie-wide color scale from the smoothed frames, and
+    weights the overall average by each smoothed frame's actual time span so
+    unevenly spaced snapshots do not bias it.
+    """
     raw_frames, centers = _growth_frames(cache, floor)
     smoothed_frames, bounds = _short_time_average(
         raw_frames, centers, GROWTH_AVERAGE_WIDTH
@@ -297,6 +303,12 @@ def _smooth_history_and_derivative(times, values, bandwidth_points=4.0, degree=3
 
 
 def _conservation(cache, solver_input, table_dir):
+    """Number and energy histories, both normalized to the initial number.
+
+    Dividing by N(0) makes the traces per-initial-particle, so runs with
+    different absolute normalizations plot on comparable scales; energy is
+    then smoothed and differentiated for the power panel.
+    """
     numbers, energies = _moments(cache, solver_input, table_dir)
     number0 = numbers[0]
     if abs(number0) <= np.finfo(float).tiny:
@@ -318,6 +330,7 @@ def _conservation(cache, solver_input, table_dir):
 
 
 def derive(cache, solver_input=None, table_dir=None):
+    """Everything the diagnostics figures need, from one pass over the cache."""
     floor = numerical_display_floor(solver_input or PATHS.solver_input)
     return {
         "growth": _growth(cache, floor),
@@ -422,6 +435,12 @@ def plot_energy_power(conservation):
 
 
 def main():
+    """CLI entry point: parse flags, load the data, render the figures.
+
+    Giving neither ``--static`` nor ``--movie`` renders both -- that is how
+    tools/run.sh invokes every plotter; either flag narrows a manual run to
+    just that output.
+    """
     from coefficients import style_cartesian_axes
     from plot_common.static import cartesian_mesh
 
@@ -454,6 +473,8 @@ def main():
         save_png(plot_energy_power(data["conservation"]), args.fig_dir,
                  "energy_power", dpi=220)
     if do_movie:
+        # Bind the derived data into the (fig, ax, index) signature
+        # render_movie expects (closures are fine: rendering is in-process).
         def draw(fig, ax, index):
             draw_growth_frame(fig, ax, vpar, vperp, style_cartesian_axes,
                               data["growth"], index)

@@ -205,6 +205,7 @@ def plot_tensor(solver_input=None, points=256):
 
 
 def main():
+    """CLI entry point: render the static tensor figure (no movie)."""
     parser = argparse.ArgumentParser(description="LHCD coefficient plot")
     parser.add_argument("--fig-dir", default=str(PATHS.figures))
     parser.add_argument("-n", "--points", type=int, default=256)

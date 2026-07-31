@@ -152,6 +152,7 @@ class SignedLogNorm(mpl.colors.Normalize):
     """
 
     def __init__(self, linthresh, vmin, vmax, split):
+        """Store the range and precompute the per-sign log spans."""
         # clip=False so out-of-range values come back masked (and draw as
         # white) rather than being silently pinned to the endpoints.
         super().__init__(vmin=vmin, vmax=vmax, clip=False)

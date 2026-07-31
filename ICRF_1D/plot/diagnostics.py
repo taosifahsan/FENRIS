@@ -15,11 +15,11 @@ The 1-D version of the growth pieces of ``ICRF_2D/plot/diagnostics.py``:
 4. **Energy and power** (static) -- the energy moment's history and its time
    derivative, the absorbed power.
 
-Used by: the ``plots`` CMake target (and by hand).
+Used by: ``tools/run.sh`` (one of the parallel plotter processes).
 
 Depends on: :mod:`plot_common.reader` (the 1-D snapshot cache, deck, floor),
 :mod:`plot_common.static` (``line1d``, ``save_png``), :mod:`plot_common.movie`
-(parallel frame rendering).
+(movie rendering).
 """
 
 from __future__ import annotations
@@ -194,6 +194,12 @@ def plot_energy_power(data):
 
 
 def main():
+    """CLI entry point: parse flags, load the data, render the figures.
+
+    Giving neither ``--static`` nor ``--movie`` renders both -- that is how
+    tools/run.sh invokes every plotter; either flag narrows a manual run to
+    just that output.
+    """
     parser = argparse.ArgumentParser(description="ICRF_1D growth diagnostics")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
@@ -224,6 +230,8 @@ def main():
         save_png(plot_particles(data), args.fig_dir, "particle_loss", dpi=220)
         save_png(plot_energy_power(data), args.fig_dir, "energy_power", dpi=220)
     if do_movie:
+        # Bind the derived data into the (fig, ax, index) signature
+        # render_movie expects (closures are fine: rendering is in-process).
         def draw(fig, ax, index):
             draw_frame(fig, ax, data, index)
 

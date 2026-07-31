@@ -278,6 +278,12 @@ def _smooth_history_and_derivative(times, values, bandwidth_points=4.0, degree=3
 
 
 def _conservation(cache):
+    """Number and energy histories, both normalized to the initial number.
+
+    Dividing by N(0) makes the traces per-initial-particle, so runs with
+    different absolute normalizations plot on comparable scales; energy is
+    then smoothed and differentiated for the power panel.
+    """
     numbers, energies = _moments(cache)
     number0 = numbers[0]
     if abs(number0) <= np.finfo(float).tiny:
@@ -294,6 +300,7 @@ def _conservation(cache):
 
 
 def derive(cache, solver_input=None):
+    """Everything the diagnostics figures need, from one pass over the cache."""
     floor = numerical_display_floor(solver_input or PATHS.solver_input)
     return {"growth": _growth(cache, floor), "conservation": _conservation(cache)}
 
@@ -393,6 +400,12 @@ def plot_energy_power(conservation):
 
 
 def main():
+    """CLI entry point: parse flags, load the data, render the figures.
+
+    Giving neither ``--static`` nor ``--movie`` renders both -- that is how
+    tools/run.sh invokes every plotter; either flag narrows a manual run to
+    just that output.
+    """
     from coefficients import style_cartesian_axes
     from plot_common.static import cartesian_mesh
 
@@ -427,6 +440,8 @@ def main():
         save_png(plot_energy_power(data["conservation"]), args.fig_dir,
                  "energy_power", dpi=220)
     if do_movie:
+        # Bind the derived data into the (fig, ax, index) signature
+        # render_movie expects (closures are fine: rendering is in-process).
         def draw(fig, ax, index):
             draw_growth_frame(fig, ax, vpar, vperp, style_cartesian_axes,
                               data["growth"], index)

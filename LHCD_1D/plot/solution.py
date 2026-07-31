@@ -16,12 +16,12 @@ Each frame's title reports the running mean and standard deviation of the
 distribution, so the movie shows the quasilinear plateau forming numerically
 as well as visually.
 
-Used by: the ``plots`` CMake target (and by hand).
+Used by: ``tools/run.sh`` (one of the parallel plotter processes).
 
 Depends on: :mod:`plot_common.runtime` (bootstrap/paths),
 :mod:`plot_common.reader` (deck + the 1-D snapshot cache),
 :mod:`plot_common.static` (save_png), :mod:`plot_common.movie`
-(parallel frame rendering).
+(movie rendering).
 """
 
 from __future__ import annotations
@@ -148,6 +148,12 @@ def draw_frame(fig, ax, data, index):
 
 
 def main():
+    """CLI entry point: parse flags, load the data, render the figures.
+
+    Giving neither ``--static`` nor ``--movie`` renders both -- that is how
+    tools/run.sh invokes every plotter; either flag narrows a manual run to
+    just that output.
+    """
     parser = argparse.ArgumentParser(description="LHCD_1D solution plots")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
@@ -173,6 +179,8 @@ def main():
         cache = load_snapshots_1d(args.output, points)
     data = derive(cache)
 
+    # Bind the derived data into the (fig, ax, index) signature render_still
+    # and render_movie expect (closures are fine: rendering is in-process).
     def draw(fig, ax, index):
         draw_frame(fig, ax, data, index)
 
