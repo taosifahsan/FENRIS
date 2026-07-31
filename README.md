@@ -1,6 +1,6 @@
 PROJECT DESCRIPTION:
-This repository uses ASGarD, the adaptive sparse grid discretization library
-(https://github.com/project-asgard/asgard) to explore various avenues of kinetic
+This repository uses ASGarD, the adaptive sparse grid discretization library 
+[![ASGarD](https://img.shields.io/badge/built%20on-ASGarD-blue)](https://github.com/project-asgard/asgard) to explore various avenues of kinetic
 theory-based Fokker-Planck equations for fusion plasma. Namely, 
 
 1. LHCD_1D solves lower-hybrid current drive for electrons in one dimension
