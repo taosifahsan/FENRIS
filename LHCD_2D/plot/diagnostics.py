@@ -26,7 +26,7 @@ bounce weight), and energy carries a factor of ``1/2`` rather than the
 resonant species' temperature ``T_a``.  The growth-rate and smoothing math is
 identical and kept local to each file rather than shared.
 
-Used by: ``LHCD_2D/plot/show_all.py``.
+Used by: ``tools/run.sh`` (one of the parallel plotter processes).
 
 Depends on: :mod:`plot_common.reader` (the cache, the noise floor),
 :mod:`plot_common.static` (drawing), :mod:`plot_common.movie` (parallel frame
@@ -57,7 +57,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from plot_common.movie import render_movie
-from plot_common.reader import load_snapshots, numerical_display_floor
+from plot_common.reader import load_cache, load_snapshots, numerical_display_floor
 from plot_common.static import contour2d, line1d, movie_scale_range, save_png
 
 # Width, in simulation time, of the centered moving average applied to
@@ -303,6 +303,10 @@ def derive(cache, solver_input=None):
 # ---------------------------------------------------------------------------
 
 
+# One size for the still and every movie frame -- stated once.
+FIGSIZE = (5.4, 4.5)
+
+
 def draw_growth_frame(fig, ax, vpar, vperp, style_axes, growth, index):
     """Draw one short-time-averaged growth-rate frame."""
     time_previous, time_current = growth["bounds"][index]
@@ -322,7 +326,7 @@ def draw_growth_frame(fig, ax, vpar, vperp, style_axes, growth, index):
 
 def plot_growth_static(vpar, vperp, style_axes, growth):
     """Overall time-averaged growth-rate contour (data-derived scale)."""
-    fig, ax = plt.subplots(figsize=(5.4, 4.5))
+    fig, ax = plt.subplots(figsize=FIGSIZE)
     contour2d(
         fig, ax, vpar, vperp, growth["average"], filled=True,
         style_axes=style_axes, extend="both",
@@ -388,34 +392,6 @@ def plot_energy_power(conservation):
     return fig
 
 
-# Per-worker state for the growth movie.
-_VPAR = _VPERP = _STYLE_AXES = _GROWTH = None
-
-
-def _init_growth_worker(vpar, vperp, style_axes, growth):
-    global _VPAR, _VPERP, _STYLE_AXES, _GROWTH
-    _VPAR, _VPERP, _STYLE_AXES, _GROWTH = vpar, vperp, style_axes, growth
-
-
-def _draw_growth_frame_task(task):
-    index = task["index"]
-    fig = plt.figure(figsize=(5.4, 4.5))
-    ax = fig.add_subplot(1, 1, 1)
-    draw_growth_frame(fig, ax, _VPAR, _VPERP, _STYLE_AXES, _GROWTH, index)
-    fig.savefig(f"{task['frame_dir']}/frame_{index:06d}.png", dpi=task["dpi"])
-    plt.close(fig)
-
-
-def plot_growth_movie(vpar, vperp, style_axes, growth, output_file, *,
-                      workers=None, fps=8, dpi=140):
-    return render_movie(
-        _draw_growth_frame_task, len(growth["frames"]), output_file,
-        fps=fps, dpi=dpi, workers=workers,
-        initializer=_init_growth_worker,
-        initargs=(vpar, vperp, style_axes, growth),
-    )
-
-
 def main():
     from coefficients import style_cartesian_axes
     from plot_common.static import cartesian_mesh
@@ -424,16 +400,20 @@ def main():
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
     parser.add_argument("-o", "--output", default=str(PATHS.snapshots))
+    parser.add_argument("--cache", default=None,
+                        help="load the shared cache.npz instead of reading snapshots")
     parser.add_argument("--fig-dir", default=str(PATHS.figures))
     parser.add_argument("-n", "--points", type=int, default=192)
-    parser.add_argument("-j", "--workers", type=int, default=0)
     parser.add_argument("--fps", type=int, default=8)
     parser.add_argument("--dpi", type=int, default=140)
     args = parser.parse_args()
     do_static = args.static or not (args.static or args.movie)
     do_movie = args.movie or not (args.static or args.movie)
 
-    cache = load_snapshots(args.output, args.points, workers=args.workers)
+    if args.cache:
+        cache = load_cache(args.cache)
+    else:
+        cache = load_snapshots(args.output, args.points)
     data = derive(cache)
     vpar, vperp = cartesian_mesh(cache.x, cache.y)
 
@@ -447,11 +427,13 @@ def main():
         save_png(plot_energy_power(data["conservation"]), args.fig_dir,
                  "energy_power", dpi=220)
     if do_movie:
-        plot_growth_movie(
-            vpar, vperp, style_cartesian_axes, data["growth"],
-            str(Path(args.fig_dir) / "growth_rate.mp4"),
-            workers=args.workers, fps=args.fps, dpi=args.dpi,
-        )
+        def draw(fig, ax, index):
+            draw_growth_frame(fig, ax, vpar, vperp, style_cartesian_axes,
+                              data["growth"], index)
+
+        render_movie(draw, len(data["growth"]["frames"]),
+                     str(Path(args.fig_dir) / "growth_rate.mp4"),
+                     figsize=FIGSIZE, fps=args.fps, dpi=args.dpi)
 
 
 if __name__ == "__main__":

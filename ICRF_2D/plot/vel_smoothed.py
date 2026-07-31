@@ -1,4 +1,4 @@
-"""The velocity- and pitch-smoothed marginals of the distribution function.
+"""The speed marginal (``vel_smoothed``) and the shared reduction machinery.
 
 Two 1-D reductions of the same 2-D solution, computed from one snapshot cache
 pass so a reconstruction is never read twice for these:
@@ -12,7 +12,9 @@ Both are drawn on a signed-log y-axis (initial curve dashed, current curve
 solid; a curve that goes negative is redrawn in fixed pink -- see
 :func:`plot_common.static.line1d`).
 
-Used by: ``ICRF_2D/plot/show_all.py``.
+Used by: ``tools/run.sh`` (one of the parallel plotter processes), and
+``theta_smoothed.py``, which imports :func:`derive`, :func:`plot_static`,
+and :func:`plot_movie` from here and only picks the other reduction.
 
 Depends on: :mod:`plot_common.reader` (the cache), :mod:`plot_common.static`
 (drawing), :mod:`plot_common.movie` (parallel frame rendering),
@@ -41,13 +43,12 @@ from plot_common.runtime import bootstrap
 
 PATHS = bootstrap(__file__)
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from coefficients import bounce_pitch_weight, initial_condition_grid
 from plot_common.movie import render_movie
-from plot_common.reader import load_snapshots, numerical_display_floor
-from plot_common.static import line1d, save_png
+from plot_common.reader import load_cache, load_snapshots, numerical_display_floor
+from plot_common.static import line1d, render_still, save_png
 
 REDUCTIONS = ("vel", "theta")
 
@@ -219,6 +220,10 @@ _LABELS = {
 }
 
 
+# One size for the still and every movie frame -- stated once.
+FIGSIZE = (5.9, 3.8)
+
+
 def draw_frame(fig, ax, data, reduction, index):
     """Draw one marginal frame: initial (dashed) versus current (solid).
 
@@ -247,71 +252,37 @@ def draw_frame(fig, ax, data, reduction, index):
     fig.tight_layout()
 
 
-def plot_static(data, reduction):
-    """Final-frame marginal: initial versus current."""
-    fig, ax = plt.subplots(figsize=(5.9, 3.8))
-    draw_frame(fig, ax, data, reduction, len(data["times"]) - 1)
-    return fig
-
-
-# Per-worker state for the movie.
-_DATA = None
-_REDUCTION = None
-
-
-def _init_smoothed_worker(data, reduction):
-    global _DATA, _REDUCTION
-    _DATA, _REDUCTION = data, reduction
-
-
-def _draw_smoothed_frame_task(task):
-    """Worker: draw and save one marginal frame.
-
-    No ``bbox_inches="tight"``: fixed ``figsize x dpi`` keeps every frame's
-    pixel dimensions identical (and even), which H.264's ``yuv420p`` requires.
-    """
-    index = task["index"]
-    fig, ax = plt.subplots(figsize=(5.9, 3.8))
-    draw_frame(fig, ax, _DATA, _REDUCTION, index)
-    fig.savefig(f"{task['frame_dir']}/frame_{index:06d}.png", dpi=task["dpi"])
-    plt.close(fig)
-
-
-def plot_movie(data, reduction, output_file, *, workers=None, fps=8, dpi=140):
-    """Render one marginal's movie, one frame per snapshot."""
-    frame_count = len(data["times"])
-    return render_movie(
-        _draw_smoothed_frame_task, frame_count, output_file,
-        fps=fps, dpi=dpi, workers=workers,
-        initializer=_init_smoothed_worker, initargs=(data, reduction),
-    )
-
-
 def main():
-    parser = argparse.ArgumentParser(description="ICRF smoothed-marginal plots")
+    parser = argparse.ArgumentParser(description="ICRF speed-marginal plots")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
     parser.add_argument("-o", "--output", default=str(PATHS.snapshots))
+    parser.add_argument("--cache", default=None,
+                        help="load the shared cache.npz instead of reading snapshots")
     parser.add_argument("--fig-dir", default=str(PATHS.figures))
     parser.add_argument("-n", "--points", type=int, default=192)
-    parser.add_argument("-j", "--workers", type=int, default=0)
     parser.add_argument("--fps", type=int, default=8)
     parser.add_argument("--dpi", type=int, default=140)
     args = parser.parse_args()
     do_static = args.static or not (args.static or args.movie)
     do_movie = args.movie or not (args.static or args.movie)
 
-    cache = load_snapshots(args.output, args.points, workers=args.workers)
+    if args.cache:
+        cache = load_cache(args.cache)
+    else:
+        cache = load_snapshots(args.output, args.points)
     data = derive(cache)
 
-    for reduction in REDUCTIONS:
-        if do_static:
-            save_png(plot_static(data, reduction), args.fig_dir,
-                     f"{reduction}_smoothed", dpi=220)
-        if do_movie:
-            out = str(Path(args.fig_dir) / f"{reduction}_smoothed.mp4")
-            plot_movie(data, reduction, out, workers=args.workers,
-                      fps=args.fps, dpi=args.dpi)
+    def draw(fig, ax, index):
+        draw_frame(fig, ax, data, "vel", index)
+
+    if do_static:
+        save_png(render_still(draw, len(data["times"]) - 1, figsize=FIGSIZE),
+                 args.fig_dir, "vel_smoothed", dpi=220)
+    if do_movie:
+        render_movie(draw, len(data["times"]),
+                     str(Path(args.fig_dir) / "vel_smoothed.mp4"),
+                     figsize=FIGSIZE, fps=args.fps, dpi=args.dpi)
 
 
 if __name__ == "__main__":

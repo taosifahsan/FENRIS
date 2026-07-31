@@ -44,17 +44,17 @@ from plot_common.runtime import bootstrap
 
 PATHS = bootstrap(__file__)
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from plot_common.movie import render_movie
 from plot_common.reader import (
+    load_cache,
     load_snapshots_1d,
     numerical_display_floor,
     option_float,
     read_options,
 )
-from plot_common.static import save_png
+from plot_common.static import render_still, save_png
 
 
 def distribution_stats(v, f):
@@ -97,6 +97,10 @@ def derive(cache, solver_input=None):
     }
 
 
+# One size for the still and every movie frame -- stated once.
+FIGSIZE = (7.2, 5.0)
+
+
 def draw_frame(fig, ax, data, index):
     """Draw one distribution frame in the deck's chosen scale."""
     v = data["v"]
@@ -109,7 +113,9 @@ def draw_frame(fig, ax, data, index):
         ax.set_ylabel(r"$f(v_{\parallel})$")
 
     scale = data["scale"]
-    draw = getattr(ax, scale, ax.plot)
+    # Strict on purpose: a deck typo crashes with the bad name rather
+    # than silently falling back to a linear plot.
+    draw = getattr(ax, scale)
     if scale in ("loglog", "semilogx"):
         # A log x-axis cannot show v<0, so mirror onto |v_parallel| and show
         # the two halves as separate curves.
@@ -141,72 +147,42 @@ def draw_frame(fig, ax, data, index):
     fig.tight_layout()
 
 
-def plot_static(data):
-    """Final-snapshot figure."""
-    fig, ax = plt.subplots(figsize=(7.2, 5.0))
-    draw_frame(fig, ax, data, len(data["frames"]) - 1)
-    return fig
-
-
-# Per-worker state for the movie, sent once via the pool initializer.
-_DATA = None
-
-
-def _init_solution_worker(data):
-    global _DATA
-    _DATA = data
-
-
-def _draw_solution_frame_task(task):
-    """Worker: draw and save one frame.
-
-    No ``bbox_inches="tight"``: fixed ``figsize x dpi`` keeps every frame's
-    pixel dimensions identical (and even), which H.264's ``yuv420p`` requires.
-    """
-    index = task["index"]
-    fig, ax = plt.subplots(figsize=(7.2, 5.0))
-    draw_frame(fig, ax, _DATA, index)
-    fig.savefig(f"{task['frame_dir']}/frame_{index:06d}.png", dpi=task["dpi"])
-    plt.close(fig)
-
-
-def plot_movie(data, output_file, *, workers=None, fps=8, dpi=140):
-    """Render the solution movie, one frame per snapshot."""
-    return render_movie(
-        _draw_solution_frame_task, len(data["frames"]), output_file,
-        fps=fps, dpi=dpi, workers=workers,
-        initializer=_init_solution_worker, initargs=(data,),
-    )
-
-
 def main():
     parser = argparse.ArgumentParser(description="LHCD_1D solution plots")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
     parser.add_argument("-o", "--output", default=str(PATHS.snapshots))
+    parser.add_argument("--cache", default=None,
+                        help="load the shared cache.npz instead of reading snapshots")
     parser.add_argument("--fig-dir", default=str(PATHS.figures))
     parser.add_argument("-n", "--points", type=int, default=0,
                         help="reconstruction points (0 = deck num_points / 2)")
-    parser.add_argument("-j", "--workers", type=int, default=0)
     parser.add_argument("--fps", type=int, default=8)
     parser.add_argument("--dpi", type=int, default=140)
     args = parser.parse_args()
     do_static = args.static or not (args.static or args.movie)
     do_movie = args.movie or not (args.static or args.movie)
 
-    points = args.points
-    if points <= 0:
-        options = read_options(PATHS.solver_input)
-        points = int(option_float(options, "num_points", 256) / 2)
-
-    cache = load_snapshots_1d(args.output, points, workers=args.workers)
+    if args.cache:
+        cache = load_cache(args.cache)
+    else:
+        points = args.points
+        if points <= 0:
+            options = read_options(PATHS.solver_input)
+            points = int(option_float(options, "num_points", 256) / 2)
+        cache = load_snapshots_1d(args.output, points)
     data = derive(cache)
 
+    def draw(fig, ax, index):
+        draw_frame(fig, ax, data, index)
+
     if do_static:
-        save_png(plot_static(data), args.fig_dir, "solution", dpi=220)
+        save_png(render_still(draw, len(data["frames"]) - 1, figsize=FIGSIZE),
+                 args.fig_dir, "solution", dpi=220)
     if do_movie:
-        plot_movie(data, str(Path(args.fig_dir) / "solution.mp4"),
-                   workers=args.workers, fps=args.fps, dpi=args.dpi)
+        render_movie(draw, len(data["frames"]),
+                     str(Path(args.fig_dir) / "solution.mp4"),
+                     figsize=FIGSIZE, fps=args.fps, dpi=args.dpi)
 
 
 if __name__ == "__main__":

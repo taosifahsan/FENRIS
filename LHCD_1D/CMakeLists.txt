@@ -6,20 +6,19 @@ project(LHCD_1D LANGUAGES CXX)
 #
 #    LHCD_1D (exe)                             <- LHCD_1D.cpp
 #    output.h5               [target: run]     <- LHCD_1D, input_solver.txt
-#    figures                 [target: plots]   <- output.h5
+#    figures                 [tools/run.sh]    <- output.h5 (cache + parallel plotters)
 #
 #  The 1-D parallel-velocity quasilinear diffusion problem: same structure as
 #  LHCD_2D/CMakeLists.txt minus snapshot cleanup (the solver stores its
 #  time snapshots as aux fields inside the single output.h5, so there is
 #  nothing separate to clean).
 #
-#  CMake owns staleness for the compile and solve; the plots target is
-#  deliberately non-incremental and renders every time it is invoked.
+#  CMake owns staleness for the compile and solve.  Plotting lives in
+#  tools/run.sh: one shared-cache build, then every plotter in parallel.
 #
 #       cmake -S . -B build      (with the ASGarD venv active)
 #       cmake --build build                        # compile
 #       cmake --build build --target run           # solve      (if stale)
-#       cmake --build build --target plots         # solve+plot (if stale)
 # ===========================================================================
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
@@ -87,6 +86,9 @@ endif()
 # declared OUTPUT is a sentinel touched only after the solver finishes: it
 # represents "solve and snapshot series complete".  Deleting movie/ removes it
 # and forces a re-solve; an interrupted solve never reaches the touch.
+# The sentinel lives inside the directory the solver cleans at startup;
+# it survives only because the solver deletes snapshot_*.h5 and nothing
+# else.  If that cleanup pattern ever broadens, this name must move.
 set(MOVIE_SENTINEL "${OUTPUT_DATA_DIR}/movie/.solve-complete")
 
 add_custom_command(
@@ -105,26 +107,3 @@ add_custom_command(
 
 add_custom_target(run DEPENDS ${MOVIE_SENTINEL})
 
-# ---------------------------------------------------------------------------
-#  stage 3 : the figures  (target: plots)
-#
-#  Deliberately NOT incremental: a custom target with no OUTPUT file is always
-#  considered out of date, so `--target plots` renders every time it is asked
-#  to.  The DEPENDS on ${OUTPUT_FILE} still chains the graph -- a stale solve
-#  runs first -- but a fresh solve does not suppress the render.
-# ---------------------------------------------------------------------------
-set(LHCD_1D_PLOT_WORKERS 0 CACHE STRING
-    "plotter worker processes (0 = every allocated core)")
-
-add_custom_target(plots
-    # Plain python3 from the caller's PATH: activate the ASGarD venv in the
-    # shell that runs `cmake --build`.  each plotter renders its static
-    # figure AND its movie by default.
-    COMMAND ${CMAKE_COMMAND} -E env PYTHONUNBUFFERED=1
-            python3 "${CMAKE_CURRENT_SOURCE_DIR}/plot/show_all.py"
-            -j ${LHCD_1D_PLOT_WORKERS}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    DEPENDS ${MOVIE_SENTINEL}
-    COMMENT "Rendering figures (plot/solution.py)"
-    USES_TERMINAL
-    VERBATIM)

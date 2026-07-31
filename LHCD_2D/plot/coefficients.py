@@ -19,7 +19,7 @@ alongside the expensive stages.
 
 Used by:
   - ``LHCD_2D/plot/diagnostics.py`` -- the boundary diffusion value
-  - ``LHCD_2D/plot/show_all.py``    -- the tensor figure
+  - ``tools/run.sh``                -- the tensor figure
 
 Depends on: :mod:`plot_common.reader` (the deck), :mod:`plot_common.static`
 (drawing).

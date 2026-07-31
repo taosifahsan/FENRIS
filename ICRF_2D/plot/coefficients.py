@@ -31,7 +31,7 @@ What lives here, in dependency order:
 Used by:
   - ``ICRF_2D/plot/diagnostics.py`` -- the initial-condition overlay and
     bounce-orbit weight
-  - ``ICRF_2D/plot/show_all.py``    -- all three figures
+  - ``tools/run.sh``                -- all three figures
 
 Depends on: :mod:`plot_common.reader` (deck + binary input),
 :mod:`plot_common.static` (all drawing).  Its own Gauss-Legendre quadrature
@@ -382,6 +382,32 @@ def gauss_legendre(function, a, b, order, vectorized=False):
     return half * float(np.dot(weights, values))
 
 
+def drag_over_diffusion(solver_input=None, table_dir=None):
+    """Return a callable ``A/B(x)``: summed collisional drag over diffusion.
+
+    The no-RF equilibrium satisfies ``B df/dx + A f = 0``, so ``d ln f/dx =
+    -A/B``.  Shared by :func:`collisional_equilibrium_shape` (which
+    integrates it) and ``temperature.py`` (whose analytic initial
+    temperature is ``T = 2 x B / A`` with ``E = x_0^2``).  A factory rather
+    than a plain function so the table reads happen once, not per call.
+    """
+    C, ell, mu = collision_arrays(solver_input, table_dir)
+
+    def ratio(xv):
+        if xv <= 0.0:
+            return 0.0
+        A = 0.0
+        B = 0.0
+        for Cb, lb, mub in zip(C, ell, mu):
+            px = psi_collision(lb * xv)
+            A += (2.0 * Cb * lb * lb / mub) * xv * xv * px
+            B += Cb * xv * px
+        # Guard a vanishing denominator (all species negligible at this speed).
+        return A / B if abs(B) > np.finfo(float).tiny else 0.0
+
+    return ratio
+
+
 def collisional_equilibrium_shape(x, solver_input=None, table_dir=None):
     """Return the no-RF collisional equilibrium distribution shape at ``x``.
 
@@ -398,20 +424,7 @@ def collisional_equilibrium_shape(x, solver_input=None, table_dir=None):
     quadrature.  ``x <= 0`` is skipped (the value stays 1, matching the
     ``exp(-0)`` limit) because ``A/B`` is undefined there.
     """
-    C, ell, mu = collision_arrays(solver_input, table_dir)
-
-    def A_over_B(xv):
-        """Ratio of summed drag to summed diffusion at one speed."""
-        if xv <= 0.0:
-            return 0.0
-        A = 0.0
-        B = 0.0
-        for Cb, lb, mub in zip(C, ell, mu):
-            px = psi_collision(lb * xv)
-            A += (2.0 * Cb * lb * lb / mub) * xv * xv * px
-            B += Cb * xv * px
-        # Guard a vanishing denominator (all species negligible at this speed).
-        return A / B if abs(B) > np.finfo(float).tiny else 0.0
+    A_over_B = drag_over_diffusion(solver_input, table_dir)
 
     eq = np.ones_like(x, dtype=float)
     for i, xi in enumerate(x):

@@ -6,24 +6,23 @@ project(LHCD_2D LANGUAGES CXX)
 #
 #    LHCD_2D (exe)                             <- LHCD_2D.cpp, solver deck
 #    output.h5 + snapshots   [target: run]     <- LHCD_2D, input_solver.txt
-#    figures                 [target: plots]   <- output.h5
+#    figures                 [tools/run.sh]    <- output.h5 (cache + parallel plotters)
 #
 #  Identical structure to ICRF_2D/CMakeLists.txt minus the table-generation
 #  stage: LHCD's quasilinear coefficients are analytic (see
 #  LHCD_2D/plot/coefficients.py), so there is nothing to pregenerate.
 #
 #  CMake is the single owner of staleness for every stage: each edge above is
-#  an OUTPUT/DEPENDS rule, so `cmake --build build --target plots` re-runs
+#  an OUTPUT/DEPENDS rule, so `cmake --build build --target run` re-runs
 #  only the stages whose inputs actually changed.  Re-running with nothing
 #  changed does nothing.
 #
 #       cmake -S . -B build      (with the ASGarD venv active)
 #       cmake --build build                        # compile
 #       cmake --build build --target run           # solve      (if stale)
-#       cmake --build build --target plots         # solve+plot (if stale)
 #
-#  The tools/run_*.sh scripts are thin wrappers over exactly those commands:
-#  they own the environment (modules, venv, core counts) and nothing else.
+#  tools/run.sh drives the pipeline: it owns the environment (venv, core
+#  counts), invokes the commands above, then runs the plotting stage itself.
 # ===========================================================================
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
@@ -97,9 +96,6 @@ endif()
 
 add_custom_command(
     OUTPUT  ${OUTPUT_FILE}
-    COMMAND ${CMAKE_COMMAND}
-            "-DOUTPUT_DATA_DIR=${OUTPUT_DATA_DIR}"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/clean_solver_outputs.cmake"
     COMMAND ${CMAKE_COMMAND} -E env ${LHCD_SOLVER_ENV}
             $<TARGET_FILE:LHCD_2D> -if ${SOLVER_DECK} -of ${OUTPUT_FILE}
     # From output_data so the solver's relative "movie/" snapshot path (from
@@ -112,30 +108,3 @@ add_custom_command(
 
 add_custom_target(run DEPENDS ${OUTPUT_FILE})
 
-# ---------------------------------------------------------------------------
-#  stage 3 : the figures  (target: plots)
-#
-#  One target: show_all.py renders everything (statics + movies) into a fresh
-#  timestamped directory under figures/.  The other plot/*.py entry points are
-#  for running by hand, outside CMake.
-#
-#  Deliberately NOT incremental: a custom target with no OUTPUT file is always
-#  considered out of date, so `--target plots` renders every time it is asked
-#  to.  The DEPENDS on ${OUTPUT_FILE} still chains the graph -- a stale solve
-#  (changed deck, solver, or tables) runs first -- but a fresh solve does not
-#  suppress the render.  Skipping happens upstream, never here.
-# ---------------------------------------------------------------------------
-set(LHCD_PLOT_WORKERS 0 CACHE STRING
-    "plotter worker processes (0 = every allocated core)")
-
-add_custom_target(plots
-    # Plain python3 from the caller's PATH: activate the ASGarD venv in the
-    # shell that runs `cmake --build`.
-    COMMAND ${CMAKE_COMMAND} -E env PYTHONUNBUFFERED=1
-            python3 "${CMAKE_CURRENT_SOURCE_DIR}/plot/show_all.py"
-            -j ${LHCD_PLOT_WORKERS}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    DEPENDS ${OUTPUT_FILE}
-    COMMENT "Rendering figures (plot/show_all.py)"
-    USES_TERMINAL
-    VERBATIM)

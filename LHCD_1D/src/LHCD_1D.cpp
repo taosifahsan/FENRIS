@@ -87,8 +87,6 @@ pde_scheme make_pde(asgard::prog_opts options)
         options.file_required<P>("inverse_min"),
         options.file_required<P>("inverse_max")
     };
-    options.default_stop_time = options.file_required<P>("time");
-    options.default_dt = options.file_required<P>("time_step");
 
     options.default_degree = 1;
     options.default_start_levels = {8, };
@@ -106,9 +104,9 @@ pde_scheme make_pde(asgard::prog_opts options)
     options.default_solver = asgard::solver_method::gmres;
     options.default_precon = asgard::precon_method::none;
 
-    options.default_isolver_tolerance  = 1.E-5;
+    options.default_isolver_tolerance  = 1.E-12;
     options.default_isolver_iterations = 1000;
-    options.default_isolver_inner_iterations = 50;
+    options.default_isolver_inner_iterations = 400;
 
     // Declaring the PDE
     pde_scheme pde(options, std::move(domain));
@@ -125,23 +123,25 @@ pde_scheme make_pde(asgard::prog_opts options)
     };
     pde.set_adapt_weight(D_adapt);
 
-    {// First term -d/dv (A * df/dv)
+    {// First term -d/dv (A(v) * df/dv)
 
-        auto A = [=](P ,
-                        asgard::vector2d<P> const &nodes,
-                        std::vector<P> const &f,
-                        std::vector<P> &vals)
-        ->void{
-            for (int64_t i = 0; i < nodes.num_strips(); i++){
-                P const v = nodes[i][0];
-                vals[i] = sign(v) * (D.val(v) + 0.5 * pow(I.val(v),3)) * f[i];
-            }
+        // A(v) is a plain function of the single coordinate, so it belongs
+        // directly inside the div as a separable coefficient -- the same
+        // div-grad chain construction the ICRF solvers use.  (The original
+        // routed it through term_interp, which exists for coefficients that
+        // cannot be written separably; in 1-D nothing qualifies, and the
+        // interpolation pass only added cost and interpolation error.)
+        auto negA = [=](const vector &v, vector &func) {
+            for (size_t i = 0; i < v.size(); ++i)
+                func[i] = -sign(v[i])
+                        * (D.val(v[i]) + 0.5 * pow(I.val(v[i]), 3));
         };
 
-        term_md Adiv{term_div(-1, boundary_type::bothsides), };
-        term_md Aint = term_interp{A};
-        term_md Agrad{ term_grad(1), };
-        pde += term_md({Adiv, Aint, Agrad});
+        term_1d div_grad({
+                term_div(negA, boundary_type::bothsides), // d/dv[ -A(v) s ]
+                term_grad(1) // s = df/dv
+        });
+        pde += term_md({div_grad});
 
         pde += term_md{ term_penalty{1/dx}, };
     }

@@ -1,17 +1,24 @@
 cut_min       	: 2.0		# D_RF region start
 cut_max       	: 4.0		# D_RF region end
-cut_sharpness 	: 0.05		# D_RF smoothness
+cut_sharpness 	: 0.01		# D_RF smoothness
 cut_height    	: 0.5		# D_RF peak value
 
-domain_min    	: -8		# Domain start
-domain_max    	: +8		# Domain end
-time		: 2    	# Simulation time
-time_step	: 1E-2		# Size of Time steps (CN is unconditionally stable; adaptation cost is per step)
-
+domain_min    	: -6		# Domain start
+domain_max    	: +6		# Domain end
 -degree        	: 2		# DG polynomial degree
 -start-levels   : 8		# Sparse grid level (256 cells over -8..8)
--max-levels     : 10		# Adaptivity ceiling (= start; the weight only prunes)
--adapt          : 1.E-8		# Adaptive threshold, as in the 2D decks
+-max-levels     : 10	# Adaptivity ceiling (= start; the weight only prunes)
+-step-method    : cn
+-dt             : 1.E-2     # Size of Time steps
+-time           : 2E0       # Total Time
+-grid           : sparse    # Simulation mode
+-solver         : gmres
+-precon         : none
+-adapt          : 1.E-8
+-isolve-tol     : 1.E-8
+-isolve-iter    : 400
+-isolve-inner   : 400
+
 
 epsilon		: 1E-2		# Regularizer near 0
 inverse_min	: -6.0		# Regularizer near min

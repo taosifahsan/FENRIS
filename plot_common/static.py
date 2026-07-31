@@ -40,12 +40,12 @@ meaningful (see :func:`plot_common.reader.numerical_display_floor`).
 
 from __future__ import annotations
 
-import datetime as _datetime
 import math
 import os
 import shutil
 
 import matplotlib as mpl
+import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -879,51 +879,20 @@ def save_png(fig, output_dir, stem, dpi=220):
     return path
 
 
+def render_still(draw_frame, index, *, figsize):
+    """One still figure, drawn by the same ``(fig, ax, index)`` closure that
+    :func:`plot_common.movie.render_movie` uses.
+
+    Sharing the closure (and the plotter's single ``FIGSIZE``) is the point:
+    the static figure and the movie frames are the same drawing by
+    construction and cannot drift apart.
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+    draw_frame(fig, ax, index)
+    return fig
+
+
 def save_all_png(figures, output_dir, dpi=450):
     """Save an iterable of ``(stem, figure)`` pairs at publication DPI."""
     for stem, fig in figures:
         save_png(fig, output_dir, stem, dpi=dpi)
-
-
-def timestamped_output_dir(base_dir):
-    """Create and return a fresh ``base_dir/YYYY-MM-DD_HH-MM-SS`` directory.
-
-    Every run writes into its own directory so results are never silently
-    overwritten and can be compared after the fact.  A ``_01``, ``_02``, ...
-    suffix is appended if the timestamp already exists (two runs starting in
-    the same second).
-    """
-    stamp = _datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    path = os.path.join(base_dir, stamp)
-    counter = 1
-    while os.path.exists(path):
-        path = os.path.join(base_dir, f"{stamp}_{counter:02d}")
-        counter += 1
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def save_input_files(output_dir, *input_files):
-    """Copy the input decks that produced a figure set alongside it.
-
-    This is what makes a figure directory self-describing months later: the
-    exact parameters are stored next to the plots.  ICRF passes both
-    ``input_solver.txt`` and ``input_build.txt``; LHCD has no build deck and
-    passes only the solver one.
-
-    A missing file warns rather than raising -- losing the archive copy is
-    not a reason to discard a completed plotting run.
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    saved = []
-    for src in input_files:
-        if not src:
-            continue
-        if not os.path.exists(src):
-            print(f"warning: input file not found: {src}")
-            continue
-        dst = os.path.join(output_dir, os.path.basename(src))
-        shutil.copyfile(src, dst)
-        print(f"saved {dst}")
-        saved.append(dst)
-    return saved

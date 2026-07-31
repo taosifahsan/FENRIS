@@ -53,17 +53,19 @@ import re
 import asgard
 import numpy as np
 
-from plot_common.runtime import process_pool, worker_count
 
 
 # ---------------------------------------------------------------------------
 # Section 1: HDF5 solver snapshots
 # ---------------------------------------------------------------------------
 #
-# A run writes many snapshot files into one directory.  Their names embed the
-# step number (``..._step_37.h5``), and every stage of the plotting pipeline
-# needs them in *simulation time* order, which for these runs is the same as
-# step order.
+# A run writes many snapshot files into one directory.  The name format,
+# ``snapshot_NNNNNN_step_NNNNNNNN.h5``, is composed by the C++ solvers (see
+# the movie block in each <project>/src/*.cpp) and parsed here -- a
+# cross-language contract that cannot live in one file, so it is at least
+# named in both.  The step number is embedded so every stage of the plotting
+# pipeline can order frames in *simulation time*, which for these runs is
+# the same as step order.
 
 
 def natural_key(path):
@@ -436,14 +438,10 @@ class SnapshotCache:
 
 
 def _snapshot_load_task(task):
-    """Worker: reconstruct one snapshot and return it with its time and axes.
+    """Reconstruct one snapshot and return it with its index, time, and axes.
 
-    Returns the index too, because pool completion order is not task order and
-    the cache must end up in time order.
-
-    Casting to float32 here rather than in the parent means the array is
-    already halved before it is pickled back, which is the dominant cost of
-    returning it.
+    Casting to float32 halves the cache footprint at no visible cost: the
+    plots never resolve more than ~7 significant digits anyway.
     """
     values, x_axis, y_axis = read_snapshot(task["path"], task["points"])
     time = snapshot_time(task["path"])
@@ -457,12 +455,13 @@ def _snapshot_load_task(task):
     return task["index"], np.asarray(values, dtype=np.float32), x_axis, y_axis, float(time)
 
 
-def load_snapshots(path, points, workers=None, dt=1.0, warn_bytes=2_000_000_000):
+def load_snapshots(path, points, dt=1.0, warn_bytes=2_000_000_000):
     """Read every snapshot under ``path`` into a :class:`SnapshotCache`.
 
-    This is the pipeline's one expensive step, and the only place a plotting run
-    reads snapshot data.  It parallelizes over snapshots because they are
-    completely independent.
+    This is the only place a plotting run reads snapshot data.  Reading is
+    serial: reconstruction is fast C++ inside asgard (~30 ms per snapshot
+    measured), so pooling here bought seconds while carrying the whole
+    spawn/pickle apparatus.
 
     Parameters
     ----------
@@ -470,8 +469,6 @@ def load_snapshots(path, points, workers=None, dt=1.0, warn_bytes=2_000_000_000)
         A snapshot directory, or a single ``.h5`` file.
     points
         Reconstruction resolution per axis.  Cost scales as ``points**2``.
-    workers
-        Pool width; ``None``/0 uses every logical CPU.
     dt
         Solver time step, used only to infer times for snapshots that predate
         the stored time field.
@@ -491,28 +488,15 @@ def load_snapshots(path, points, workers=None, dt=1.0, warn_bytes=2_000_000_000)
         for index, file_path in enumerate(files)
     ]
 
-    print(
-        f"reading {len(files)} snapshots at {points}x{points} "
-        f"with {min(worker_count(workers), max(1, len(files)))} workers",
-        flush=True,
-    )
+    print(f"reading {len(files)} snapshots at {points}x{points}", flush=True)
 
+    # Serial on purpose: the reconstruction is fast C++ inside asgard
+    # (~30 ms/snapshot measured), so a process pool here bought ~3 seconds
+    # at the price of the spawn/pickle machinery.
     results = [None] * len(files)
-    pool_width = min(worker_count(workers), max(1, len(tasks)))
-    if pool_width == 1 or len(tasks) == 1:
-        # Serial path keeps single-core runs debuggable and skips pool startup.
-        for task in tasks:
-            index, values, x_axis, y_axis, time = _snapshot_load_task(task)
-            results[index] = (values, x_axis, y_axis, time)
-    else:
-        with process_pool(pool_width) as pool:
-            # chunksize=1: tasks are expensive and their cost varies with how
-            # refined each snapshot's grid is, so larger chunks would strand
-            # work at the tail.
-            for index, values, x_axis, y_axis, time in pool.map(
-                _snapshot_load_task, tasks, chunksize=1
-            ):
-                results[index] = (values, x_axis, y_axis, time)
+    for task in tasks:
+        index, values, x_axis, y_axis, time = _snapshot_load_task(task)
+        results[index] = (values, x_axis, y_axis, time)
 
     # Sort by time.  Filename order is usually already time order, but a
     # restarted run can break that, and every consumer assumes monotonicity.
@@ -640,7 +624,54 @@ class SnapshotCache1D:
         return len(self.frames)
 
 
-def load_snapshots_1d(path, points, workers=None, dt=1.0):
+# ---------------------------------------------------------------------------
+# Shared cache file: read once, plot many
+# ---------------------------------------------------------------------------
+
+
+def save_cache(cache, path):
+    """Write a reconstructed cache to ``path`` as a single ``.npz`` file.
+
+    Stage one of a plotting run (see ``tools/run.sh``): reconstruction through
+    asgard is the expensive part of reading, so it happens exactly once --
+    ``plot/cache.py`` calls this -- and every plotter process launched in
+    parallel afterwards loads the file back with :func:`load_cache` in
+    milliseconds.
+    """
+    arrays = {
+        "frames": np.stack(cache.frames),
+        "times": np.asarray(cache.times, dtype=np.float64),
+        "x": np.asarray(cache.x),
+        "files": np.array([str(f) for f in cache.files]),
+        "points": np.asarray(cache.points),
+    }
+    if isinstance(cache, SnapshotCache):
+        arrays["y"] = np.asarray(cache.y)
+    np.savez(path, **arrays)
+    print(f"saved {path} ({len(cache.frames)} frames)", flush=True)
+    return path
+
+
+def load_cache(path):
+    """Load a cache written by :func:`save_cache`.  No asgard involved.
+
+    Returns a :class:`SnapshotCache` or :class:`SnapshotCache1D` according to
+    what was saved: 2-D caches carry a ``y`` axis, 1-D ones do not.
+    """
+    data = np.load(path)
+    common = dict(
+        frames=list(data["frames"]),
+        times=[float(time) for time in data["times"]],
+        x=data["x"],
+        files=[str(f) for f in data["files"]],
+        points=int(data["points"]),
+    )
+    if "y" in data:
+        return SnapshotCache(y=data["y"], **common)
+    return SnapshotCache1D(**common)
+
+
+def load_snapshots_1d(path, points, dt=1.0):
     """Read every 1-D snapshot under ``path`` into a :class:`SnapshotCache1D`.
 
     The 1-D analogue of :func:`load_snapshots`; cheap enough that no memory
@@ -652,21 +683,13 @@ def load_snapshots_1d(path, points, workers=None, dt=1.0):
         for index, file_path in enumerate(files)
     ]
 
-    pool_width = min(worker_count(workers), max(1, len(tasks)))
-    print(f"reading {len(files)} 1-D snapshots at {points} points "
-          f"with {pool_width} workers", flush=True)
+    print(f"reading {len(files)} 1-D snapshots at {points} points", flush=True)
 
+    # Serial on purpose; see load_snapshots.
     results = [None] * len(files)
-    if pool_width == 1 or len(tasks) == 1:
-        for task in tasks:
-            index, values, axis, time = _snapshot_load_task_1d(task)
-            results[index] = (values, axis, time)
-    else:
-        with process_pool(pool_width) as pool:
-            for index, values, axis, time in pool.map(
-                _snapshot_load_task_1d, tasks, chunksize=4
-            ):
-                results[index] = (values, axis, time)
+    for task in tasks:
+        index, values, axis, time = _snapshot_load_task_1d(task)
+        results[index] = (values, axis, time)
 
     order = sorted(range(len(results)), key=lambda i: results[i][2])
     return SnapshotCache1D(

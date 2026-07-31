@@ -5,9 +5,8 @@ needs only ``snapshot.cells`` -- the active hierarchical cell indices -- never
 a dense reconstruction, so reading it is dramatically cheaper than the
 solution/smoothed/diagnostics pipeline.  That is why this file does its own
 lightweight read rather than sharing the expensive cache: forcing it through
-the shared cache would gain nothing and complicate the one thing that is
-allowed to run concurrently with the expensive reconstruction pass in
-``show_all.py``.
+the shared cache would gain nothing: in a ``tools/run.sh`` batch this
+plotter runs as its own parallel process and never waits on the cache.
 
 Two outputs:
 
@@ -23,7 +22,7 @@ The refinement-level geometry (:func:`hierarchical_interval`,
 it local means the whole algorithm is visible in one file rather than split
 across a shared module and a caller.
 
-Used by: ``ICRF_2D/plot/show_all.py``.
+Used by: ``tools/run.sh`` (one of the parallel plotter processes).
 
 Depends on: :mod:`plot_common.reader` (``read_adaptive_grid``),
 :mod:`plot_common.static` (``level_contour``, ``line1d``),
@@ -60,8 +59,7 @@ from plot_common.reader import (
     read_options,
     snapshot_files,
 )
-from plot_common.runtime import process_pool, worker_count
-from plot_common.static import level_contour, line1d, save_png
+from plot_common.static import level_contour, line1d, render_still, save_png
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +125,6 @@ def _span_lookup(indices, samples, domain_left, domain_right):
             max(0, index.bit_length() - 1),
         )
     return spans
-
 
 
 SAMPLES_PER_LEAF = 4
@@ -206,14 +203,13 @@ def refinement_levels(cells, domain_min, domain_max, x_points, theta_points):
     return theta, x, level
 
 
-
 # ---------------------------------------------------------------------------
 # Reading and deriving
 # ---------------------------------------------------------------------------
 
 
-def load(snapshot_dir, workers=None, solver_input=None):
-    """Read the grid structure of every snapshot, in parallel.
+def load(snapshot_dir, solver_input=None):
+    """Read the grid structure of every snapshot (cheap, serial).
 
     Cheap: each task reads only ``snapshot.cells`` and two domain vectors, no
     reconstruction.  Returns a dict with ``records`` (one
@@ -228,13 +224,10 @@ def load(snapshot_dir, workers=None, solver_input=None):
     resolution = (_resolution_for_max_level(max_levels[0]),
                   _resolution_for_max_level(max_levels[1]))
 
+    # Serial: a cells-only read is milliseconds per snapshot, so a pool
+    # here was machinery without a payoff.
     files = snapshot_files(snapshot_dir)
-    pool_width = min(worker_count(workers), max(1, len(files)))
-    if pool_width == 1 or len(files) == 1:
-        records = [read_adaptive_grid(f) for f in files]
-    else:
-        with process_pool(pool_width) as pool:
-            records = list(pool.map(read_adaptive_grid, files, chunksize=8))
+    records = [read_adaptive_grid(f) for f in files]
 
     # Each record is read_adaptive_grid's 5-tuple
     # (cells, domain_min, domain_max, time, num_cells); [3] is time, [4] is
@@ -251,6 +244,10 @@ def load(snapshot_dir, workers=None, solver_input=None):
 # ---------------------------------------------------------------------------
 # Static figures
 # ---------------------------------------------------------------------------
+
+
+# One size for the still and every movie frame -- stated once.
+FIGSIZE = (5.4, 4.5)
 
 
 def draw_level_frame(fig, ax, record, frame_index, frame_count, resolution):
@@ -279,16 +276,6 @@ def draw_level_frame(fig, ax, record, frame_index, frame_count, resolution):
     fig.subplots_adjust(left=0.15, right=0.88, bottom=0.14, top=0.84)
 
 
-def plot_static(data):
-    """Final-frame refinement-level map."""
-    records = data["records"]
-    fig = plt.figure(figsize=(5.4, 4.5))
-    ax = fig.add_subplot(1, 1, 1)
-    draw_level_frame(fig, ax, records[-1], len(records) - 1, len(records),
-                     data["resolution"])
-    return fig
-
-
 def plot_dof(data):
     """Active cell count (degrees of freedom) versus simulation time."""
     fig, ax = plt.subplots(figsize=(6.5, 4.0), constrained_layout=True)
@@ -308,61 +295,12 @@ def plot_dof(data):
 # Movie
 # ---------------------------------------------------------------------------
 
-# Per-worker state: the records list and sampling resolution, sent once via
-# the pool initializer rather than once per frame.
-_RECORDS = None
-_RESOLUTION = None
-
-
-def _init_grid_worker(records, resolution):
-    global _RECORDS, _RESOLUTION
-    _RECORDS, _RESOLUTION = records, resolution
-
-
-def _draw_grid_frame_task(task):
-    """Worker: draw and save one refinement-level frame.
-
-    Module-level (not a closure) so it can be pickled for ``spawn`` workers;
-    receives the shared records list via the pool initializer.
-
-    Deliberately **no** ``bbox_inches="tight"``: a fixed ``figsize x dpi``
-    keeps every frame's pixel dimensions identical (and even), which H.264's
-    ``yuv420p`` requires.  ``bbox_inches="tight"`` crops to content and would
-    make dimensions vary -- and occasionally come out odd -- per frame,
-    silently breaking the H.264 encode and falling back to unplayable MPEG-4.
-    """
-    index = task["index"]
-    fig = plt.figure(figsize=(5.4, 4.5))
-    ax = fig.add_subplot(1, 1, 1)
-    draw_level_frame(fig, ax, _RECORDS[index], index, len(_RECORDS),
-                     _RESOLUTION)
-    fig.savefig(f"{task['frame_dir']}/frame_{index:06d}.png", dpi=task["dpi"])
-    plt.close(fig)
-
-
-def plot_movie(data, output_file, *, workers=None, fps=8, dpi=140):
-    """Render the refinement-level movie, one frame per snapshot."""
-    records = data["records"]
-    return render_movie(
-        _draw_grid_frame_task, len(records), output_file,
-        fps=fps, dpi=dpi, workers=workers,
-        initializer=_init_grid_worker,
-        initargs=(records, data["resolution"]),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Standalone entry point
-# ---------------------------------------------------------------------------
-
-
 def main():
     parser = argparse.ArgumentParser(description="ICRF adaptive-grid plots")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
     parser.add_argument("-o", "--output", default=str(PATHS.snapshots))
     parser.add_argument("--fig-dir", default=str(PATHS.figures))
-    parser.add_argument("-j", "--workers", type=int, default=0)
     parser.add_argument("--fps", type=int, default=8)
     parser.add_argument("--dpi", type=int, default=140)
     # Accepted and ignored: this plotter reads only the grid structure, never
@@ -374,14 +312,20 @@ def main():
     do_static = args.static or not (args.static or args.movie)
     do_movie = args.movie or not (args.static or args.movie)
 
-    data = load(args.output, workers=args.workers)
+    data = load(args.output)
+
+    def draw(fig, ax, index):
+        draw_level_frame(fig, ax, data["records"][index], index,
+                         len(data["records"]), data["resolution"])
 
     if do_static:
-        save_png(plot_static(data), args.fig_dir, "grid_level", dpi=220)
+        save_png(render_still(draw, len(data["records"]) - 1, figsize=FIGSIZE),
+                 args.fig_dir, "grid_level", dpi=220)
         save_png(plot_dof(data), args.fig_dir, "grid_dof", dpi=220)
     if do_movie:
-        out = str(Path(args.fig_dir) / "grid_level.mp4")
-        plot_movie(data, out, workers=args.workers, fps=args.fps, dpi=args.dpi)
+        render_movie(draw, len(data["records"]),
+                     str(Path(args.fig_dir) / "grid_level.mp4"),
+                     figsize=FIGSIZE, fps=args.fps, dpi=args.dpi)
 
 
 if __name__ == "__main__":

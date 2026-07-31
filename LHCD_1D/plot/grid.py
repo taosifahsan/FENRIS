@@ -47,8 +47,7 @@ from plot_common.reader import (
     read_options,
     snapshot_files,
 )
-from plot_common.runtime import process_pool, worker_count
-from plot_common.static import line1d, save_png
+from plot_common.static import line1d, render_still, save_png
 
 # See LHCD_2D/plot/grid.py for the full explanation of the hierarchical
 # numbering: 1-D index p sits at level bit_length(p)-1; indices 0 and 1 are
@@ -95,8 +94,8 @@ def refinement_levels(cells, domain_min, domain_max, points):
     return v, level
 
 
-def load(snapshot_dir, workers=None, solver_input=None):
-    """Read the grid structure of every snapshot, in parallel.
+def load(snapshot_dir, solver_input=None):
+    """Read the grid structure of every snapshot (cheap, serial).
 
     Returns records (time-sorted ``(cells, dmin, dmax, time, num_cells)``),
     ``times``, ``dofs``, and the deck-derived sampling ``resolution``.
@@ -106,13 +105,10 @@ def load(snapshot_dir, workers=None, solver_input=None):
                               option_number(options, "-start-levels", 8))
     resolution = _resolution_for_max_level(max_level)
 
+    # Serial: a cells-only read is milliseconds per snapshot, so a pool
+    # here was machinery without a payoff.
     files = snapshot_files(snapshot_dir)
-    pool_width = min(worker_count(workers), max(1, len(files)))
-    if pool_width == 1 or len(files) == 1:
-        records = [read_adaptive_grid(f) for f in files]
-    else:
-        with process_pool(pool_width) as pool:
-            records = list(pool.map(read_adaptive_grid, files, chunksize=8))
+    records = [read_adaptive_grid(f) for f in files]
 
     # Each record is read_adaptive_grid's 5-tuple
     # (cells, domain_min, domain_max, time, num_cells); [3] is time.
@@ -125,6 +121,10 @@ def load(snapshot_dir, workers=None, solver_input=None):
         "resolution": resolution,
         "max_level": int(max_level),
     }
+
+
+# One size for the still and every movie frame -- stated once.
+FIGSIZE = (6.5, 4.2)
 
 
 def draw_level_frame(fig, ax, record, frame_index, frame_count, data):
@@ -147,14 +147,6 @@ def draw_level_frame(fig, ax, record, frame_index, frame_count, data):
     fig.subplots_adjust(left=0.12, right=0.95, bottom=0.14, top=0.82)
 
 
-def plot_static(data):
-    """Final-frame refinement profile."""
-    records = data["records"]
-    fig, ax = plt.subplots(figsize=(6.5, 4.2))
-    draw_level_frame(fig, ax, records[-1], len(records) - 1, len(records), data)
-    return fig
-
-
 def plot_dof(data):
     """Active cell count versus simulation time."""
     fig, ax = plt.subplots(figsize=(6.5, 4.0), constrained_layout=True)
@@ -170,42 +162,12 @@ def plot_dof(data):
     return fig
 
 
-# Per-worker state for the movie.
-_DATA = None
-
-
-def _init_grid_worker(data):
-    global _DATA
-    _DATA = data
-
-
-def _draw_grid_frame_task(task):
-    """Worker: draw and save one refinement-profile frame (fixed figsize x
-    dpi -- no tight bbox -- for H.264-safe dimensions)."""
-    index = task["index"]
-    fig, ax = plt.subplots(figsize=(6.5, 4.2))
-    draw_level_frame(fig, ax, _DATA["records"][index], index,
-                     len(_DATA["records"]), _DATA)
-    fig.savefig(f"{task['frame_dir']}/frame_{index:06d}.png", dpi=task["dpi"])
-    plt.close(fig)
-
-
-def plot_movie(data, output_file, *, workers=None, fps=8, dpi=140):
-    """Render the refinement-profile movie, one frame per snapshot."""
-    return render_movie(
-        _draw_grid_frame_task, len(data["records"]), output_file,
-        fps=fps, dpi=dpi, workers=workers,
-        initializer=_init_grid_worker, initargs=(data,),
-    )
-
-
 def main():
     parser = argparse.ArgumentParser(description="LHCD_1D adaptive-grid plots")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
     parser.add_argument("-o", "--output", default=str(PATHS.snapshots))
     parser.add_argument("--fig-dir", default=str(PATHS.figures))
-    parser.add_argument("-j", "--workers", type=int, default=0)
     parser.add_argument("--fps", type=int, default=8)
     parser.add_argument("--dpi", type=int, default=140)
     parser.add_argument("-n", "--points", type=int, default=None,
@@ -214,14 +176,20 @@ def main():
     do_static = args.static or not (args.static or args.movie)
     do_movie = args.movie or not (args.static or args.movie)
 
-    data = load(args.output, workers=args.workers)
+    data = load(args.output)
+
+    def draw(fig, ax, index):
+        draw_level_frame(fig, ax, data["records"][index], index,
+                         len(data["records"]), data)
 
     if do_static:
-        save_png(plot_static(data), args.fig_dir, "grid_level", dpi=220)
+        save_png(render_still(draw, len(data["records"]) - 1, figsize=FIGSIZE),
+                 args.fig_dir, "grid_level", dpi=220)
         save_png(plot_dof(data), args.fig_dir, "grid_dof", dpi=220)
     if do_movie:
-        plot_movie(data, str(Path(args.fig_dir) / "grid_level.mp4"),
-                   workers=args.workers, fps=args.fps, dpi=args.dpi)
+        render_movie(draw, len(data["records"]),
+                     str(Path(args.fig_dir) / "grid_level.mp4"),
+                     figsize=FIGSIZE, fps=args.fps, dpi=args.dpi)
 
 
 if __name__ == "__main__":

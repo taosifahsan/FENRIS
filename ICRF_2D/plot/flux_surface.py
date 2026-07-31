@@ -24,7 +24,7 @@ an X-point (a saddle, through which the separatrix passes) -- and locating and
 classifying those is most of the work here.
 
 Used by:
-  - ``ICRF_2D/plot/show_all.py`` -- the trajectory figure
+  - ``tools/run.sh`` -- the trajectory figure
 
 Depends on: :mod:`plot_common.reader` (the build deck).  No snapshot access,
 no coefficients.  Deliberately does not route through

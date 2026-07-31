@@ -4,12 +4,11 @@ The 1-D version of the growth pieces of ``LHCD_2D/plot/diagnostics.py``:
 
 1. **Growth-rate movie** -- gamma(v) = (f_next - f_prev) / (dt * |f_prev|),
    the relative growth per collision time, one frame per consecutive
-   snapshot pair.  The denominator is clipped at the numerical error floor so
-   noise-level values cannot manufacture huge rates.
-2. **Average growth** (static) -- the time-average of the instantaneous
-   rates above, where each velocity averages only over the frames whose
-   denominator was genuinely above the floor (so front-arrival division
-   artifacts are excluded and the curve stays continuous).
+   snapshot pair.  Wherever the solution sits below the numerical error
+   floor the rate is defined as exactly zero: sub-floor values are solver
+   noise, and noise/noise ratios manufacture growth that is not there.
+2. **Average growth** (static) -- the full-span time-average of the
+   logarithmic rate, with the same sub-floor-is-zero rule.
 
 3. **Particle conservation** (static) -- relative change of the number
    moment over the run.
@@ -48,6 +47,7 @@ import numpy as np
 
 from plot_common.movie import render_movie
 from plot_common.reader import (
+    load_cache,
     load_snapshots_1d,
     numerical_display_floor,
     option_float,
@@ -84,20 +84,23 @@ def derive(cache, solver_input=None):
             continue
         prev = np.asarray(cache.frames[index], dtype=float)
         nxt = np.asarray(cache.frames[index + 1], dtype=float)
-        denom = np.maximum(np.abs(prev), floor)
-        rates.append((nxt - prev) / (dt * denom))
+        # Below the numerical floor (solver tolerances or machine error,
+        # whichever is larger) the "solution" is noise, and noise/noise
+        # ratios manufacture growth that is not there -- so the growth rate
+        # of a sub-floor region is defined as exactly zero.
+        valid = (np.abs(prev) > floor) & (np.abs(nxt) > floor)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            raw = (nxt - prev) / (dt * np.abs(prev))
+        rates.append(np.where(valid, raw, 0.0))
         times.append(cache.times[index + 1])
 
-    # Time-average of the *logarithmic* rate over each velocity's measurable
-    # window.  The movie's (f2-f1)/(dt f1) equals (R-1)/dt for per-pair growth
-    # factor R; where the heating front arrives R is enormous and a plain
-    # average is swamped by those few frames.  ln(R)/dt is the same quantity
-    # for slow growth but stays tame through the front, and dt-weighting makes
-    # the average telescope to (ln f_end - ln f_first) / (measurable window)
-    # per velocity -- finite, continuous, and never touching sub-floor values.
+    # Full-span time-average of the *logarithmic* rate, with the same rule as
+    # the movie: sub-floor pairs contribute exactly zero.  ln(R)/dt rather
+    # than (R-1)/dt so the frames where the heating front arrives (R huge)
+    # do not swamp the mean; zero-not-excluded means every velocity averages
+    # over the same window, so the curve has no per-velocity window seams.
     frames = [np.asarray(f, dtype=float) for f in cache.frames]
     log_sum = np.zeros_like(frames[0])
-    time_sum = np.zeros_like(frames[0])
     for index in range(len(frames) - 1):
         dt = cache.times[index + 1] - cache.times[index]
         if dt <= 0.0:
@@ -107,9 +110,7 @@ def derive(cache, solver_input=None):
         with np.errstate(divide="ignore", invalid="ignore"):
             step = np.log(np.abs(nxt) / np.abs(prev))
         log_sum += np.where(valid, step, 0.0)
-        time_sum += np.where(valid, dt, 0.0)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        average = np.where(time_sum > 0, log_sum / time_sum, np.nan)
+    average = log_sum / (cache.times[-1] - cache.times[0])
 
     number, energy = _moments(cache, solver_input)
     frame_times = np.asarray(cache.times, dtype=float)
@@ -120,6 +121,10 @@ def derive(cache, solver_input=None):
             "average": average, "span": span,
             "frame_times": frame_times, "number": number,
             "energy": energy, "power": power}
+
+
+# One size for the still and every movie frame -- stated once.
+FIGSIZE = (6.5, 4.2)
 
 
 def draw_frame(fig, ax, data, index):
@@ -148,9 +153,9 @@ def plot_average(data):
     ax.plot(data["v"], data["average"], color="#2d1e8f", lw=1.8)
     ax.set_xlim(data["v"][0], data["v"][-1])
     ax.set_xlabel(r"$v_{\parallel}$", fontsize=13)
-    ax.set_ylabel(r"$\langle \partial_t \ln|f| \rangle_{measurable}$  $[1/\tau]$",
+    ax.set_ylabel(r"$\langle \partial_t \ln|f| \rangle$  $[1/\tau]$",
                   fontsize=13)
-    ax.set_title(rf"mean growth rate over measurable frames, $t = 0..{data['span']:.0f}\,\tau$",
+    ax.set_title(rf"mean growth rate, $t = 0..{data['span']:.0f}\,\tau$ (0 below the noise floor)",
                  fontsize=12)
     ax.grid(alpha=0.25)
     return fig
@@ -185,54 +190,30 @@ def plot_energy_power(data):
     return fig
 
 
-# Per-worker state for the movie.
-_DATA = None
-
-
-def _init_growth_worker(data):
-    global _DATA
-    _DATA = data
-
-
-def _draw_growth_frame_task(task):
-    """Worker: draw and save one growth frame (fixed dims for H.264)."""
-    index = task["index"]
-    fig, ax = plt.subplots(figsize=(6.5, 4.2))
-    draw_frame(fig, ax, _DATA, index)
-    fig.savefig(f"{task['frame_dir']}/frame_{index:06d}.png", dpi=task["dpi"])
-    plt.close(fig)
-
-
-def plot_movie(data, output_file, *, workers=None, fps=8, dpi=140):
-    """Render the growth-rate movie, one frame per snapshot pair."""
-    return render_movie(
-        _draw_growth_frame_task, len(data["rates"]), output_file,
-        fps=fps, dpi=dpi, workers=workers,
-        initializer=_init_growth_worker, initargs=(data,),
-    )
-
-
 def main():
     parser = argparse.ArgumentParser(description="LHCD_1D growth diagnostics")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
     parser.add_argument("-o", "--output", default=str(PATHS.snapshots))
+    parser.add_argument("--cache", default=None,
+                        help="load the shared cache.npz instead of reading snapshots")
     parser.add_argument("--fig-dir", default=str(PATHS.figures))
     parser.add_argument("-n", "--points", type=int, default=0,
                         help="reconstruction points (0 = deck num_points / 2)")
-    parser.add_argument("-j", "--workers", type=int, default=0)
     parser.add_argument("--fps", type=int, default=8)
     parser.add_argument("--dpi", type=int, default=140)
     args = parser.parse_args()
     do_static = args.static or not (args.static or args.movie)
     do_movie = args.movie or not (args.static or args.movie)
 
-    points = args.points
-    if points <= 0:
-        options = read_options(PATHS.solver_input)
-        points = int(option_float(options, "num_points", 256) / 2)
-
-    cache = load_snapshots_1d(args.output, points, workers=args.workers)
+    if args.cache:
+        cache = load_cache(args.cache)
+    else:
+        points = args.points
+        if points <= 0:
+            options = read_options(PATHS.solver_input)
+            points = int(option_float(options, "num_points", 256) / 2)
+        cache = load_snapshots_1d(args.output, points)
     data = derive(cache)
 
     if do_static:
@@ -240,8 +221,12 @@ def main():
         save_png(plot_particles(data), args.fig_dir, "particle_loss", dpi=220)
         save_png(plot_energy_power(data), args.fig_dir, "energy_power", dpi=220)
     if do_movie:
-        plot_movie(data, str(Path(args.fig_dir) / "growth_rate.mp4"),
-                   workers=args.workers, fps=args.fps, dpi=args.dpi)
+        def draw(fig, ax, index):
+            draw_frame(fig, ax, data, index)
+
+        render_movie(draw, len(data["rates"]),
+                     str(Path(args.fig_dir) / "growth_rate.mp4"),
+                     figsize=FIGSIZE, fps=args.fps, dpi=args.dpi)
 
 
 if __name__ == "__main__":

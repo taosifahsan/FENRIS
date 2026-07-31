@@ -7,11 +7,11 @@ are fixed rather than flag-selectable.
 with one fixed color scale (so a color means the same value in every frame).
 Both read through :func:`plot_common.reader.load_snapshots` exactly once --
 this is the plotter most other plots in this project piggyback on when run
-from ``show_all.py``, since the solution reconstruction is the expensive step
+from ``tools/run.sh``, since the solution reconstruction is the expensive step
 every other 2-D/marginal figure also needs.
 
 Used by:
-  - ``ICRF_2D/plot/show_all.py`` -- calls :func:`derive` on the shared cache
+  - ``tools/run.sh`` -- runs this as one of the parallel plotter processes
 
 Depends on: :mod:`plot_common.reader` (the cache), :mod:`plot_common.static`
 (drawing), :mod:`plot_common.movie` (parallel frame rendering),
@@ -38,12 +38,11 @@ from plot_common.runtime import bootstrap
 
 PATHS = bootstrap(__file__)
 
-import matplotlib.pyplot as plt
-
 from coefficients import initial_condition_grid, style_cartesian_axes
 from plot_common.movie import render_movie
-from plot_common.reader import load_snapshots, numerical_display_floor
+from plot_common.reader import load_cache, load_snapshots, numerical_display_floor
 from plot_common.static import (
+    render_still,
     cartesian_mesh,
     contour2d,
     movie_scale_range,
@@ -78,6 +77,10 @@ def _title(time):
     return rf"$\mathcal{{F}}_0$:  time, $t = {time:.2f}\,\tau_c$"
 
 
+# One size for the still and every movie frame -- stated once.
+FIGSIZE = (5.4, 4.5)
+
+
 def draw_frame(fig, ax, data, index):
     """Draw one solution frame from already-derived data."""
     contour2d(
@@ -89,69 +92,37 @@ def draw_frame(fig, ax, data, index):
     fig.subplots_adjust(left=0.13, right=0.88, bottom=0.13, top=0.84)
 
 
-def plot_static(data):
-    """Final-snapshot solution contour."""
-    fig = plt.figure(figsize=(5.4, 4.5))
-    ax = fig.add_subplot(1, 1, 1)
-    draw_frame(fig, ax, data, len(data["frames"]) - 1)
-    return fig
-
-
-# Per-worker state for the movie: the derived data, sent once via the pool
-# initializer.
-_DATA = None
-
-
-def _init_solution_worker(data):
-    global _DATA
-    _DATA = data
-
-
-def _draw_solution_frame_task(task):
-    """Worker: draw and save one solution frame.
-
-    No ``bbox_inches="tight"``: fixed ``figsize x dpi`` keeps every frame's
-    pixel dimensions identical (and even), which H.264's ``yuv420p`` requires.
-    """
-    index = task["index"]
-    fig = plt.figure(figsize=(5.4, 4.5))
-    ax = fig.add_subplot(1, 1, 1)
-    draw_frame(fig, ax, _DATA, index)
-    fig.savefig(f"{task['frame_dir']}/frame_{index:06d}.png", dpi=task["dpi"])
-    plt.close(fig)
-
-
-def plot_movie(data, output_file, *, workers=None, fps=8, dpi=140):
-    """Render the solution movie, one fixed-scale frame per snapshot."""
-    return render_movie(
-        _draw_solution_frame_task, len(data["frames"]), output_file,
-        fps=fps, dpi=dpi, workers=workers,
-        initializer=_init_solution_worker, initargs=(data,),
-    )
-
-
 def main():
     parser = argparse.ArgumentParser(description="ICRF solution plot")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
     parser.add_argument("-o", "--output", default=str(PATHS.snapshots))
+    parser.add_argument("--cache", default=None,
+                        help="load the shared cache.npz instead of reading snapshots")
     parser.add_argument("--fig-dir", default=str(PATHS.figures))
     parser.add_argument("-n", "--points", type=int, default=192)
-    parser.add_argument("-j", "--workers", type=int, default=0)
     parser.add_argument("--fps", type=int, default=8)
     parser.add_argument("--dpi", type=int, default=140)
     args = parser.parse_args()
     do_static = args.static or not (args.static or args.movie)
     do_movie = args.movie or not (args.static or args.movie)
 
-    cache = load_snapshots(args.output, args.points, workers=args.workers)
+    if args.cache:
+        cache = load_cache(args.cache)
+    else:
+        cache = load_snapshots(args.output, args.points)
     data = derive(cache)
 
+    def draw(fig, ax, index):
+        draw_frame(fig, ax, data, index)
+
     if do_static:
-        save_png(plot_static(data), args.fig_dir, "solution", dpi=220)
+        save_png(render_still(draw, len(data["frames"]) - 1, figsize=FIGSIZE),
+                 args.fig_dir, "solution", dpi=220)
     if do_movie:
-        out = str(Path(args.fig_dir) / "solution.mp4")
-        plot_movie(data, out, workers=args.workers, fps=args.fps, dpi=args.dpi)
+        render_movie(draw, len(data["frames"]),
+                     str(Path(args.fig_dir) / "solution.mp4"),
+                     figsize=FIGSIZE, fps=args.fps, dpi=args.dpi)
 
 
 if __name__ == "__main__":
