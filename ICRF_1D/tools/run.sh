@@ -24,6 +24,8 @@ set -euo pipefail
 
 # ----- cores ----------------------------------------------------------------
 BUILD_CORES=8       # compile parallelism
+SOLVER_CORES=4      # ASGarD solve OpenMP threads (4 measured fastest, ~1.2x
+                    # over the old 2; >10 spills onto E-cores, much slower)
 
 # -----------------------------------------------------------------------------
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,7 +40,8 @@ timed() { local s=$SECONDS; "$@"; local rc=$?; echo "[time] ${2}: $((SECONDS - s
 {
 t_total=$SECONDS
 
-cmake -S "${project_root}" -B "${project_root}/build"
+cmake -S "${project_root}" -B "${project_root}/build" \
+    -DICRF_1D_SOLVER_OMP_THREADS="${SOLVER_CORES}"
 
 t=$SECONDS
 cmake --build "${project_root}/build" -j "${BUILD_CORES}" --target run

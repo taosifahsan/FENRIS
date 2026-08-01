@@ -12,7 +12,9 @@ domain_max    	: +6		# Domain end
 -dt             : 1.E-2     # Size of Time steps
 -time           : 2E0       # Total Time
 -grid           : sparse    # Simulation mode
--solver         : gmres
+# direct: dense LU at dof ~1.7k.  Unpreconditioned gmres needed ~650
+# iterations per step here -- measured 14x slower (76 s vs 5.4 s).
+-solver         : direct
 -precon         : none
 -adapt          : 1.E-8
 -isolve-tol     : 1.E-8

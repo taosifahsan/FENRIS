@@ -24,7 +24,8 @@ set -euo pipefail
 # ----- cores ----------------------------------------------------------------
 BUILD_CORES=14       # compile parallelism
 TABLE_CORES=14       # build_tables OpenMP threads (coefficient tables)
-SOLVER_CORES=2       # ASGarD solve OpenMP threads (2 measured fastest)
+SOLVER_CORES=6       # ASGarD solve OpenMP threads (5-6 measured fastest, ~1.5x
+                     # over 2; flat to 8; >10 spills onto E-cores, 2-3x slower)
 
 # -----------------------------------------------------------------------------
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

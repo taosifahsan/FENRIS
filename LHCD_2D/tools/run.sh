@@ -23,7 +23,8 @@ set -euo pipefail
 
 # ----- cores ----------------------------------------------------------------
 BUILD_CORES=8       # compile parallelism
-SOLVER_CORES=2      # ASGarD solve OpenMP threads (2 measured fastest)
+SOLVER_CORES=4      # ASGarD solve OpenMP threads (4 measured fastest; 4-8 flat,
+                    # 2 is ~25% slower; the whole solve is seconds either way)
 
 # -----------------------------------------------------------------------------
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
