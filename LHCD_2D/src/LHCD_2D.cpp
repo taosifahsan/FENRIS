@@ -1,3 +1,23 @@
+// ────────────────────────────────────────────────────────────────────────────
+// Normalization (standardized across all four FENRIS projects)
+// ────────────────────────────────────────────────────────────────────────────
+// velocity  x = v / v_th   with  v_th = sqrt(2 T_e / m_e)
+// time      t -> nu t      with  nu the collision frequency built from THIS
+//                          v_th (nu ~ C / v_th^3), so tau_c here is the
+//                          collision time of the sqrt(2T/m) convention
+// equilibrium               f_M ~ exp(-x^2), single-particle energy T_e x^2
+//
+// Collision coefficients in these units:
+//   speed diffusion  D_c = 1/(4x^3)      (the -0.25 literal below)
+//   speed drag       A   = 1/(2x^2)      (the -0.5 literal below)
+//   pitch scattering nu_D = (Zi+1)/(4x^3)
+// Check: A/D_c = 2x = -d ln exp(-x^2)/dx, so the Maxwellian is stationary.
+//
+// (Before 2026-08 this project used v_th = sqrt(T/m), equilibrium
+// exp(-x_old^2/2), D_c = 1/(2 x_old^3).  The change of variables
+// x = x_old/sqrt(2), t -> t/(2 sqrt 2) maps old runs onto new ones exactly;
+// only the diffusion literal changed, drag and pitch are invariant.)
+// ────────────────────────────────────────────────────────────────────────────
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -9,6 +29,11 @@
 #include <vector>
 #include <asgard.hpp>
 #include <asgard_pde.hpp>
+
+// The user-editable initial condition f0(x, theta): lives in input_data/
+// because it is an input, even though it is code.  See the header itself for
+// the contract.
+#include "initial_condition.hpp"
 
 using P = asgard::default_precision;
 
@@ -141,10 +166,12 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
         pde += term_md({term_div(-0.5, asgard::flux_type::upwind),
             term_identity{}});
         
-        // Diffusion: s=1/x^2 d/dx(x^2 zeta q), with the collision-model
-        // Robin coefficient 0.5 at both radial boundaries.
+        // Diffusion: s=1/x^2 d/dx(x^2 zeta q), D_c = 1/(4x^3) in the
+        // standard sqrt(2T/m) units (see the normalization header).  The
+        // Robin coefficient stays 0.5: it cancels the drag term's boundary
+        // flux x^2 A f = f/2, which the standardization leaves unchanged.
         term_1d div_grad_x({
-            term_div(-0.5, asgard::flux_type::upwind,
+            term_div(-0.25, asgard::flux_type::upwind,
                      asgard::boundary_type::bothsides),
             term_grad(x_linear),
         });
@@ -288,22 +315,49 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
     pde += term_md({div_theta, diffusion, grad_K_thetax});
     pde += term_md({div_theta, diffusion, grad_K_thetatheta});
 
-    // initial condition
+    // initial condition f(0,x,theta) = f_0(x,theta), user-supplied as the
+    // (fully 2-D, non-separable allowed) lambda in
+    // input_data/initial_condition.hpp -- a compile input: editing it
+    // triggers a rebuild and a re-solve through the normal CMake staleness
+    // rules.
     {
-        auto initial_x = [](std::vector<P> const &x, P,
-                            std::vector<P> &value) {
-            for (std::size_t i = 0; i < x.size(); ++i)
-                value[i] = x[i] * x[i] * std::pow(P{2} * PI, P{-1.5})
-                         * std::exp(-x[i] * x[i] / P{2});
-        };
-        
-        auto initial_th = [](std::vector<P> const &theta, P,
-                             std::vector<P> &value) {
-            for (std::size_t i = 0; i < theta.size(); ++i)
-                value[i] = std::sin(theta[i]);
-        };
-
-        pde.add_initial(separable_func({initial_x, initial_th}));
+        // Normalize numerically as a 3-D velocity distribution:
+        // 2 pi * integral f0 x^2 sin(theta) dx dtheta = 1, so the default
+        // Maxwellian shape reproduces the old hard-coded (2 pi)^{-3/2}
+        // prefactor exactly.  Composite 2-D Simpson: milliseconds, and both
+        // integrands here are smooth.
+        P norm = 0;
+        {
+            int const nx = 2048, nth = 1024;  // intervals; even, per Simpson
+            P const hx = x_max / nx;
+            P const hth = PI / nth;
+            for (int i = 0; i <= nx; ++i) {
+                P const x = i * hx;
+                P const wx = (i == 0 || i == nx) ? 1 : (i % 2 ? 4 : 2);
+                P row = 0;
+                for (int j = 0; j <= nth; ++j) {
+                    P const th = j * hth;
+                    P const wth = (j == 0 || j == nth) ? 1 : (j % 2 ? 4 : 2);
+                    row += wth * initial_f0(x, th) * std::sin(th);
+                }
+                norm += wx * x * x * row * (hth / 3);
+            }
+            norm *= P{2} * PI * hx / 3;
+            if (!(norm > 0) || !std::isfinite(norm))
+                throw std::runtime_error(
+                    "initial_condition.hpp: 2 pi * integral of "
+                    "f0 x^2 sin(theta) must be positive and finite");
+        }
+        // Unlike the old separable path (which projected mass-weighted
+        // values against the local mass matrices), the non-separable initial
+        // condition goes through asgard's interpolation machinery, which
+        // collocates the function *itself* -- so supply plain f0, no
+        // Jacobian.
+        pde.set_initial([norm](P, asgard::vector2d<P> const &nodes,
+                               std::vector<P> &fx) {
+            for (std::int64_t i = 0; i < nodes.num_strips(); ++i)
+                fx[i] = initial_f0(nodes[i][0], nodes[i][1]) / norm;
+        });
     }
     
     return pde;

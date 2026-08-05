@@ -51,6 +51,10 @@ endforeach()
 find_package(asgard 0.9.0 REQUIRED)
 
 add_executable(LHCD_2D "${LHCD_SOURCE_DIR}/LHCD_2D.cpp")
+# input_data holds initial_condition.hpp -- an *input* that happens to be
+# code.  The compiler's header dependency tracking makes editing it trigger
+# a rebuild, and the solve rule below depends on the binary, so a re-solve.
+target_include_directories(LHCD_2D PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/input_data")
 target_compile_features(LHCD_2D PRIVATE cxx_std_17)
 target_link_libraries(LHCD_2D PRIVATE asgard::asgard)
 target_compile_options(LHCD_2D PRIVATE

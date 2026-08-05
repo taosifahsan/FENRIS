@@ -19,6 +19,11 @@
 
 #include "asgard.hpp"
 #include "GL.hpp"
+
+// The user-editable initial condition f0(x, theta, coll_eq): lives in
+// input_data/ because it is an input, even though it is code.  See the
+// header itself for the contract.
+#include "initial_condition.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -346,7 +351,13 @@ public:
         }, P{0.0}, x_max);
     }
     
-    P collisional_th_norm() const{
+    // General form: integral of mass_th(theta) * g(theta) over 0..pi, with
+    // the same trapped-passing-peak substitution as the plain norm -- the
+    // peak lives in mass_th, so any smooth extra shape g rides along
+    // accurately.  Used by the initial-condition normalization, where g is
+    // the user f0's pitch dependence at one x.
+    template<typename G>
+    P collisional_th_norm_shaped(G g) const{
         // L has a narrow peak at the trapped-passing boundary.  Locate that
         // boundary from the first-half pitch table, transform the distance from
         // that boundary on each side, and use pitch symmetry for the other half.
@@ -369,10 +380,10 @@ public:
         // On either side use |theta-theta_turn|=u^2, so uniformly distributed
         // GL nodes in u cluster quadratically close to the peak.  The factor
         // 2*u is dtheta/du.
-        auto integrate_side = [this, theta_turn](P theta_span, P direction) {
-            auto transformed = [this, theta_turn, direction](P u) {
-                return P{2} * u
-                     * mass_th(theta_turn + direction * u * u);
+        auto integrate_side = [this, theta_turn, g](P theta_span, P direction) {
+            auto transformed = [this, theta_turn, direction, g](P u) {
+                P const th = theta_turn + direction * u * u;
+                return P{2} * u * mass_th(th) * g(th);
             };
             return gl::integrate<32>(
                 transformed, P{0}, std::sqrt(theta_span));
@@ -381,6 +392,10 @@ public:
         return P{2} * (
             integrate_side(theta_turn, P{-1})
           + integrate_side(P{0.5} * PI - theta_turn, P{1}));
+    }
+
+    P collisional_th_norm() const{
+        return collisional_th_norm_shaped([](P) { return P{1}; });
     }
     
     // A center at or beyond x_max explicitly disables the artificial RF
@@ -563,6 +578,12 @@ asgard::pde_scheme<P> make_icrf_pde(asgard::prog_opts options, Tables const* tab
             term_div(neg_B_cv, flux::upwind, bc::bothsides),
             term_grad(mass_x),
         });
+        // Zero TOTAL flux at the wall: B_cv f' + A_cv f = 0.  The chain
+        // already carries B_cv, so the Robin supplies the drag flux A_cv --
+        // a flux, not a log-derivative (LHCD_2D's 0.5 is likewise its drag
+        // coefficient).  A_cv -> 0 at the origin, hence 0 on the left.
+        div_grad_xc.set_left_robin(P{0.0});
+        div_grad_xc.set_right_robin(cf.A_cv(x_max));
         
         pde += term_md({div_grad_xc, term_identity{}});
 
@@ -621,8 +642,10 @@ asgard::pde_scheme<P> make_icrf_pde(asgard::prog_opts options, Tables const* tab
         // which do not preserve the nonlinear identity B*F=C*E.
         // These operators act on the conservative density
         // x^2*sin(theta)*lambda*f.
-        term_md div_dx({term_div{P{-1.0}, flux::upwind}, term_volume{P{1.0}}});
-        term_md div_theta({term_volume{P{1.0}}, term_div{P{-1.0}, flux::upwind}});
+        term_md div_dx({term_div{P{-1.0}, flux::upwind, bc::bothsides},
+                        term_volume{P{1.0}}});
+        term_md div_theta({term_volume{P{1.0}},
+                           term_div{P{-1.0}, flux::upwind, bc::bothsides}});
         auto R_ql = [cf](P, asgard::vector2d<P> const& nodes,
                          std::vector<P> const& input,
                          std::vector<P>& output) {
@@ -698,17 +721,40 @@ asgard::pde_scheme<P> make_icrf_pde(asgard::prog_opts options, Tables const* tab
     }
 
     // ========================================================================
-    //  INITIAL CONDITION : zero-flux collisional equilibrium
+    //  INITIAL CONDITION : f0(x, theta, coll_eq) from
+    //  input_data/initial_condition.hpp (a compile input: editing it triggers
+    //  a rebuild and a re-solve).  Fully 2-D; the default returns the
+    //  zero-flux collisional equilibrium, reproducing the old behavior.
     // ========================================================================
-    // Normalize with the separable evolution measure
-    // x^2 * sin(theta0) * lambda(theta0).
-    auto initial_x = [cf, theta_norm, x_norm](
-                         std::vector<P> const& x, std::vector<P>& value) {
-        for (std::size_t i = 0; i < x.size(); ++i)
-            value[i] = cf.mass_x(x[i]) * cf.collisional_equilibrium(x[i])
-                     / (theta_norm * x_norm);
-    };
-    pde.add_initial(asgard::separable_func<P>({initial_x, mass_th}));
+    // Normalize against the evolution measure x^2 lambda(theta) sin(theta),
+    // with the gyrophase 2 pi folded in: the full 3-D particle count starts
+    // at exactly 1 (the solver's conserved 2-D weighted moment therefore at
+    // 1/(2 pi)), matching LHCD_2D's convention so the density_* plots of
+    // both projects read N = 1.  The x integral (GL64, smooth) nests the
+    // peak-split theta quadrature so a pitch-dependent f0 still integrates
+    // accurately across the trapped-passing boundary.
+    P const init_norm = P{2} * PI * gl::integrate<64>([cf](P x) {
+        P const eq = cf.collisional_equilibrium(x);
+        return cf.mass_x(x) * cf.collisional_th_norm_shaped(
+            [x, eq](P th) { return static_cast<P>(initial_f0(x, th, eq)); });
+    }, P{0.0}, x_max);
+    if (!(init_norm > P{0.0}) || !std::isfinite(init_norm))
+        throw std::runtime_error(
+            "initial_condition.hpp: integral of f0 against the evolution "
+            "measure must be positive and finite");
+    // Unlike the old separable path (which projected mass-weighted values
+    // against the local mass matrices), the non-separable initial condition
+    // goes through asgard's interpolation machinery, which collocates the
+    // function *itself* -- so supply plain f0, no evolution measure.
+    pde.set_initial([cf, init_norm](P, asgard::vector2d<P> const &nodes,
+                                    std::vector<P> &fx) {
+        for (std::int64_t i = 0; i < nodes.num_strips(); ++i) {
+            P const x = nodes[i][0];
+            P const th = nodes[i][1];
+            fx[i] = initial_f0(x, th, cf.collisional_equilibrium(x))
+                  / init_norm;
+        }
+    });
 
     return pde;
 }

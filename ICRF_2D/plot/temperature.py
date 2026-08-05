@@ -11,14 +11,14 @@ The initial line is the constant ``T_bg = 1`` (exact while every deck
 species shares one temperature -- see the note in :func:`derive`); each
 frame's curve is finite-differenced from the reconstructed marginal.  No
 steady-state overlays (unlike the 1-D version): just initial versus
-current, in the same layout as ``vel_smoothed``.
+current, in the same layout as the marginal plots.
 
 Wherever |F_0| is below the numerical display floor the temperature is a
 ratio of noise over noise and is masked out (drawn as a gap).
 
 Used by: ``tools/run.sh`` (one of the parallel plotter processes).
 
-Depends on: ``vel_smoothed.py`` (the shared :func:`derive`, the marginal
+Depends on: ``density_x.py`` (the shared :func:`derive`, the marginal
 itself, and ``FIGSIZE``), :mod:`plot_common` for everything mechanical.
 """
 
@@ -46,7 +46,7 @@ import numpy as np
 from plot_common.movie import render_movie
 from plot_common.reader import load_cache, load_snapshots
 from plot_common.static import render_still, save_png
-from vel_smoothed import FIGSIZE, derive as derive_marginal
+from density_x import FIGSIZE, derive as derive_marginal
 
 
 def _finite_diff(values):
@@ -84,7 +84,7 @@ def local_temperature(f, x, floor):
 def derive(cache, solver_input=None):
     """Temperature of every frame's speed marginal, plus a fixed y-range.
 
-    Rides entirely on :func:`vel_smoothed.derive`: one marginal reduction of
+    Rides entirely on ``density_x.py``'s :func:`derive`: one marginal reduction of
     the shared cache, then one finite-difference pass per frame.
     """
     base = derive_marginal(cache, solver_input=solver_input)

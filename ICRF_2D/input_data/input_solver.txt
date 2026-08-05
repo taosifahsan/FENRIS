@@ -32,7 +32,7 @@ logLambda_ea    : 17.0
 
 # ---- Simulation Params ----
 -dt             : 1E-2       # Size of Time steps
--time           : 5E1        # Total Time
+-time           : 5E2        # Total Time
 -degree         : 2          # DG polynomial degree
 -start-levels	: 5 5
 -max-levels     : 5 5

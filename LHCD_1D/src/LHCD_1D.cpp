@@ -6,6 +6,10 @@
 
 #include "asgard.hpp"
 
+// The user-editable initial condition f0(v): lives in input_data/ because it
+// is an input, even though it is code.  See the header itself for the contract.
+#include "initial_condition.hpp"
+
 // Use ASGarD's default precision (typically double)
 using P = asgard::default_precision;
 
@@ -158,11 +162,36 @@ pde_scheme make_pde(asgard::prog_opts options)
 
     }
 
-    {// initial condition f(0,v) = exp(-v^2)
-        auto init = [=](vector const &v, P , vector &func){
-            for (size_t i = 0; i < v.size(); i++) {
-                func[i] = exp(-v[i]*v[i]);
+    // initial condition f(0,v) = f_0(v), user-supplied as the lambda in
+    // input_data/initial_condition.hpp (a compile input: editing it triggers
+    // a rebuild and a re-solve through the normal CMake staleness rules).
+    {
+        // Normalize numerically so integral f_0 dv = 1 over the actual
+        // domain, whatever shape the lambda returns (composite Simpson;
+        // microseconds).  Diagnostics divide by N(0) and the plotters
+        // renormalize, so this changes no downstream figure -- it only fixes
+        // the absolute scale that the old hard-coded exp(-v^2) left at
+        // sqrt(pi).
+        P const v_lo = options.file_required<P>("domain_min");
+        P const v_hi = options.file_required<P>("domain_max");
+        P norm = 0;
+        {
+            int const n = 1 << 16;  // intervals; even, as Simpson requires
+            P const h = (v_hi - v_lo) / n;
+            for (int i = 0; i <= n; i++) {
+                P const v = v_lo + i * h;
+                P const w = (i == 0 || i == n) ? 1 : (i % 2 ? 4 : 2);
+                norm += w * initial_f0(v);
             }
+            norm *= h / 3;
+            if (!(norm > 0) || !std::isfinite(norm))
+                throw std::runtime_error(
+                    "initial_condition.hpp: integral of f0(v) over the "
+                    "domain must be positive and finite");
+        }
+        auto init = [norm](vector const &v, P , vector &func){
+            for (size_t i = 0; i < v.size(); i++)
+                func[i] = initial_f0(v[i]) / norm;
         };
 
         pde.add_initial(separable_func({init}));

@@ -1,28 +1,40 @@
-"""The speed marginal (``vel_smoothed``) and the shared reduction machinery.
+"""The conserved speed density ``n(x_0)`` and the shared reduction machinery.
 
-Two 1-D reductions of the same 2-D solution, computed from one snapshot cache
-pass so a reconstruction is never read twice for these:
+Owns the marginal reduction of the 2-D solution: the ``_integral_spec`` /
+:func:`derive` machinery lives here, and ``density_theta.py`` and
+``temperature.py`` import it (one reduction pass covers all three when run
+from the same cache).  By deliberate convention (see
+``bounce_pitch_weight``'s docstring in ``coefficients.py``) each reduction
+inside :func:`derive` carries only the ELIMINATED coordinate's measure
+factor, never the surviving one's -- that keeps the shape-preserving
+marginal available to ``temperature.py``, whose log-derivative diagnostic
+must not have the thermal core sent to zero by an ``x_0^2`` factor.  This
+file's own plot then multiplies the surviving factor back in at the call
+site, producing the true conserved density
 
-  ``vel``    -- integrate out pitch angle with the bounce-orbit weight, giving
-               a marginal versus speed, ``x_0``
-  ``theta``  -- integrate out speed, giving a marginal versus pitch angle,
-               ``theta_0`` (degrees)
+    n(x_0) = 2 pi x_0^2 * integral F_0(x_0, theta_0) lambda(theta_0) sin(theta_0) dtheta_0
 
-Both are drawn on a signed-log y-axis (initial curve dashed, current curve
-solid; a curve that goes negative is redrawn in fixed pink -- see
-:func:`plot_common.static.line1d`).
+whose *area is the full 3-D particle count* -- gyrophase ``2 pi``
+included -- exactly 1 at t=0 by the initial-condition normalization
+(the same convention as LHCD_2D).  ``integral n dx_0`` equals
+``density_theta.py``'s ``integral n dtheta_0`` frame by frame, and both are
+``2 pi *`` ``diagnostics.py``'s number moment.  The multiplication happens here at the
+call site, not inside the shared reduction -- both quantities are
+legitimate and different callers need each.
 
-Used by: ``tools/run.sh`` (one of the parallel plotter processes);
-``theta_smoothed.py``, which imports :func:`derive`, :func:`draw_frame`, and
-``FIGSIZE`` from here and only picks the other reduction; and
-``temperature.py``, which builds its temperature curves on the ``vel``
-marginal.
+Drawn on a signed-log y-axis, matching the shape plots: the density spans
+decades, and :func:`plot_common.static.line1d` splits any negative
+reconstruction ringing into its own branch rather than hiding it.  The
+measure's zero at ``x_0 = 0`` dives below the display floor.
 
-Depends on: :mod:`plot_common.reader` (the cache), :mod:`plot_common.static`
-(drawing), :mod:`plot_common.movie` (movie rendering),
-``coefficients.py`` (the initial condition and the bounce-orbit pitch
-weight).  The grid-orientation and trapezoid-weight helpers are small enough
-to keep local to this file rather than shared.
+Used by: ``tools/run.sh`` (one of the parallel plotter processes).
+
+Used also by: ``density_theta.py`` and ``temperature.py``, which import
+:func:`derive` (and ``FIGSIZE``) from here.
+
+Depends on: ``coefficients.py`` (the bounce weight and the initial
+condition), :mod:`plot_common.reader` (the cache), :mod:`plot_common.static`
+(drawing), :mod:`plot_common.movie` (movie rendering).
 """
 
 from __future__ import annotations
@@ -47,16 +59,12 @@ PATHS = bootstrap(__file__)
 
 import numpy as np
 
-from coefficients import bounce_pitch_weight, initial_condition_grid
+from coefficients import bounce_pitch_quadrature, initial_condition_grid
 from plot_common.movie import render_movie
 from plot_common.reader import load_cache, load_snapshots, numerical_display_floor
 from plot_common.static import line1d, render_still, save_png
 
 REDUCTIONS = ("vel", "theta")
-
-# Reduced (1-D marginal) curves span more decades than a 2-D contour, because
-# integrating concentrates the peak while the tail keeps falling.
-LOG_DECADES = 7.0
 
 
 def _grid_axes(x0, theta0):
@@ -120,10 +128,11 @@ def _integral_spec(x0, theta0, reduction, solver_input, table_dir):
     order = np.argsort(theta)
     theta = theta[order]
     # Bounce-orbit measure lambda(theta)*sin(theta), matching the solver's
-    # conserved phase-space mass.
-    weights = _trapezoid_weights(theta) * bounce_pitch_weight(
-        theta, solver_input, table_dir
-    )
+    # conserved phase-space mass -- integrated exactly against this grid's
+    # hat functions (see bounce_pitch_quadrature: pointwise lambda under a
+    # plain trapezoid steps over the trapped-passing peak, and the error
+    # moves with reconstruction resolution).
+    weights = bounce_pitch_quadrature(theta, solver_input, table_dir)
     return x, {"axis": pitch_axis, "order": order, "weights": weights}
 
 
@@ -214,41 +223,67 @@ def derive(cache, solver_input=None, table_dir=None):
     return result
 
 
-_LABELS = {
-    "vel": (r"$x_0$",
-           r"$\int \mathcal{F}_0(x_0,\theta_0)\lambda(\theta_0)\sin\theta_0\,d\theta_0$"),
-    "theta": (r"$\theta_0$ [deg]",
-             r"$\int \mathcal{F}_0(x_0,\theta_0)x_0^2\,dx_0$"),
-}
+
+def derive_density(cache):
+    """Weight the pitch-integrated marginal into the conserved density n(x_0).
+
+    Reuses :func:`derive` above (one reduction pass, shared with
+    ``density_theta.py`` and ``temperature.py``) and multiplies each frame by
+    the surviving-coordinate measure ``x_0^2``.  Also integrates each frame's
+    density so the drawing can print the running particle number -- the
+    quantity whose conservation this plot exists to display.
+    """
+    data = derive(cache)
+    branch = data["vel"]
+    x = np.asarray(branch["x"], dtype=float)
+    # 2 pi: the gyrophase integral, made explicit so the area is the full
+    # 3-D particle count rather than the bare 2-D weighted moment.
+    weight = 2.0 * np.pi * x * x
+    initial = weight * np.asarray(branch["initial"], dtype=float)
+    frames = [weight * np.asarray(frame, dtype=float) for frame in branch["frames"]]
+    numbers = [float(np.trapezoid(frame, x)) for frame in frames]
+
+    # Signed-log y-limits, same convention as the shape plots: the floor
+    # bounds the bottom so measure zeros and reconstruction noise dive below
+    # the axis instead of compressing it, and the top spans every frame so a
+    # movie's axis does not rescale as the solution evolves.
+    everything = np.concatenate([np.abs(initial)] + [np.abs(fr) for fr in frames])
+    finite = everything[np.isfinite(everything) & (everything > 0.0)]
+    low, high = float(data["floor"]), float(finite.max()) * 1.1
+    return {
+        "x": x,
+        "initial": initial,
+        "frames": frames,
+        "numbers": numbers,
+        "times": data["times"],
+        "ylim": (low, high),
+    }
 
 
 # One size for the still and every movie frame -- stated once.
 FIGSIZE = (5.9, 3.8)
 
 
-def draw_frame(fig, ax, data, reduction, index):
-    """Draw one marginal frame: initial (dashed) versus current (solid).
-
-    theta is linear (its magnitude doesn't span decades, and a linear axis
-    shows its shape more directly); vel stays signed-log.
-    """
-    branch = data[reduction]
-    xlabel, title = _LABELS[reduction]
-    scale = "linear" if reduction == "theta" else "log"
+def draw_frame(fig, ax, data, index):
+    """One density frame: initial (dashed) versus current (solid), linear."""
     line1d(
-        ax, branch["x"],
+        ax, data["x"],
         [
-            (branch["initial"], "initial", {"color": "#171717",
-                                             "linestyle": "--", "lw": 1.8}),
-            (branch["frames"][index], "current", {"color": "#118ab2",
-                                                    "linestyle": "-", "lw": 2.0}),
+            (data["initial"], "initial", {"color": "#999999",
+                                          "linestyle": "--", "lw": 1.8}),
+            (data["frames"][index], "current", {"color": "#118ab2",
+                                                "linestyle": "-", "lw": 2.0}),
         ],
-        scale=scale, ylim=branch["ylim"], legend=False,
+        scale="log", ylim=data["ylim"], legend=False,
     )
-    time_label = rf"time, $t = {data['times'][index]:.2f}\,\tau_c$"
-    ax.set_xlabel(xlabel, fontsize=13)
-    ax.set_ylabel("amplitude", fontsize=13)
-    ax.set_title(f"{title}:  {time_label}", fontsize=12)
+    ax.set_xlabel(r"$x_0$", fontsize=13)
+    ax.set_ylabel(r"$n(x_0)$", fontsize=13)
+    ax.set_title(
+        r"$n(x_0)=2\pi x_0^2\int\mathcal{F}_0\,\lambda(\theta_0)\sin\theta_0\,d\theta_0$"
+        rf":  $t={data['times'][index]:.2f}\,\tau_c$,"
+        rf"  $N={data['numbers'][index]:.4f}$",
+        fontsize=11,
+    )
     ax.grid(alpha=0.25)
     ax.legend(frameon=False)
     fig.tight_layout()
@@ -261,7 +296,7 @@ def main():
     tools/run.sh invokes every plotter; either flag narrows a manual run to
     just that output.
     """
-    parser = argparse.ArgumentParser(description="ICRF speed-marginal plots")
+    parser = argparse.ArgumentParser(description="ICRF speed-density plots")
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--movie", action="store_true")
     parser.add_argument("-o", "--output", default=str(PATHS.snapshots))
@@ -279,19 +314,19 @@ def main():
         cache = load_cache(args.cache)
     else:
         cache = load_snapshots(args.output, args.points)
-    data = derive(cache)
+    data = derive_density(cache)
 
     # Bind the derived data into the (fig, ax, index) signature render_still
     # and render_movie expect (closures are fine: rendering is in-process).
     def draw(fig, ax, index):
-        draw_frame(fig, ax, data, "vel", index)
+        draw_frame(fig, ax, data, index)
 
     if do_static:
         save_png(render_still(draw, len(data["times"]) - 1, figsize=FIGSIZE),
-                 args.fig_dir, "vel_smoothed", dpi=220)
+                 args.fig_dir, "density_x", dpi=220)
     if do_movie:
         render_movie(draw, len(data["times"]),
-                     str(Path(args.fig_dir) / "vel_smoothed.mp4"),
+                     str(Path(args.fig_dir) / "density_x.mp4"),
                      figsize=FIGSIZE, fps=args.fps, dpi=args.dpi)
 
 

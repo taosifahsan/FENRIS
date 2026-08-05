@@ -91,6 +91,10 @@ add_custom_target(generate_tables DEPENDS ${TABLE_FILES})
 #  stage 2 : ICRF_2D solver
 # ---------------------------------------------------------------------------
 add_executable(ICRF_2D "${ICRF_SOURCE_DIR}/ICRF_2D.cpp")
+# input_data holds initial_condition.hpp -- an *input* that happens to be
+# code.  The compiler's header dependency tracking makes editing it trigger
+# a rebuild, and the solve rule below depends on the binary, so a re-solve.
+target_include_directories(ICRF_2D PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/input_data")
 target_compile_features(ICRF_2D PRIVATE cxx_std_17)
 target_include_directories(ICRF_2D PRIVATE "${ICRF_SOURCE_DIR}")
 target_link_libraries(ICRF_2D PRIVATE asgard::asgard)

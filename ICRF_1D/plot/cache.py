@@ -1,17 +1,17 @@
-"""Build the shared snapshot cache: the single expensive read of a plot run.
+"""Build the shared snapshot cache for ICRF_1D: the one expensive read.
 
-Stage one of ``tools/run.sh``: reconstructing snapshots through asgard costs
-seconds, so it happens exactly once, here, and the result is saved to one
-``.npz`` file.  The plotters that run.sh then launches in parallel load that
-file back in milliseconds via their ``--cache`` flag instead of each
-re-reading the snapshots.
+The implementation lives in :mod:`plot_common.cache_methods`, shared by all
+four projects.  Nothing here is project-specific -- these files were
+byte-identical within each dimensionality -- so this wrapper passes only its
+own ``PATHS``.
 
 Used by: ``tools/run.sh`` (stage one, before the parallel plotters launch).
+
+Depends on: :mod:`plot_common.cache_methods`.
 """
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -28,29 +28,8 @@ from plot_common.runtime import bootstrap
 
 PATHS = bootstrap(__file__)
 
-from plot_common.reader import (
-    load_snapshots_1d,
-    option_float,
-    read_options,
-    save_cache,
-)
-
-
-def main():
-    """CLI entry point: reconstruct every snapshot once, write the .npz cache."""
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("-o", "--output", default=str(PATHS.snapshots))
-    parser.add_argument("-n", "--points", type=int, default=0,
-                        help="reconstruction points (0 = deck num_points / 2)")
-    parser.add_argument("--out", default=str(PATHS.snapshots.parent / "cache.npz"))
-    args = parser.parse_args()
-
-    points = args.points
-    if points <= 0:
-        points = int(option_float(read_options(PATHS.solver_input),
-                                  "num_points", 256) / 2)
-    save_cache(load_snapshots_1d(args.output, points), args.out)
+from plot_common.cache_methods import main_1d
 
 
 if __name__ == "__main__":
-    main()
+    main_1d(PATHS)

@@ -38,6 +38,10 @@
 #include <stdexcept>
 #include "asgard.hpp"
 
+// The user-editable initial condition f0(v): lives in input_data/ because it
+// is an input, even though it is code.  See the header itself for the contract.
+#include "initial_condition.hpp"
+
 // Use ASGarD's default precision (typically double)
 using P = asgard::default_precision;
 
@@ -286,18 +290,37 @@ asgard::pde_scheme<P> make_pde(asgard::prog_opts options)
         pde += term_md({div_grad,});
     }
     
-    // initial condition f(0,v) = f_0(v) := 4/sqrt(pi) * exp(-v^2)
+    // initial condition f(0,v) = f_0(v), user-supplied as the lambda in
+    // input_data/initial_condition.hpp (a compile input: editing it triggers
+    // a rebuild and a re-solve through the normal CMake staleness rules).
     {
-        P m_test = options.file_required<P>("m");
-        // init := f_0(v) * v^2
-        auto init = [m_test](vector const &v, P , vector &func){
-            for (size_t i = 0; i < v.size(); i++){
-                P f_0 =  2 * gauss_fact * std::exp(-m_test * pow(v[i],2)); //f_0(v)
-                func[i] =  pow(m_test,1.5) * pow(v[i],2) * f_0; // v^2 f_0
+        P const m_test = options.file_required<P>("m");
+        // Normalize numerically so integral f_0 v^2 dv = 1 over the actual
+        // domain, whatever shape the lambda returns.  Composite Simpson on a
+        // fine uniform grid: microseconds of setup cost, and exact enough
+        // (~1e-14 relative) that the default Maxwellian reproduces the old
+        // hard-coded analytic normalization to machine precision.
+        P norm = 0;
+        {
+            int const n = 1 << 16;  // intervals; even, as Simpson requires
+            P const h = (v_max - v_min) / n;
+            for (int i = 0; i <= n; i++) {
+                P const v = v_min + i * h;
+                P const w = (i == 0 || i == n) ? 1 : (i % 2 ? 4 : 2);
+                norm += w * initial_f0(v, m_test) * v * v;
             }
-           
+            norm *= h / 3;
+            if (!(norm > 0) || !std::isfinite(norm))
+                throw std::runtime_error(
+                    "initial_condition.hpp: integral of f0(v) v^2 over the "
+                    "domain must be positive and finite");
+        }
+        // init := v^2 f_0(v) / norm
+        auto init = [m_test, norm](vector const &v, P, vector &func){
+            for (size_t i = 0; i < v.size(); i++)
+                func[i] = pow(v[i], 2) * initial_f0(v[i], m_test) / norm;
         };
-        
+
         pde.add_initial(separable_func({init}));// v^2 f(v,0) = v^2 f_0(v)
     }
     

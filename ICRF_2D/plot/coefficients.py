@@ -545,12 +545,15 @@ def collisional_pitch_norm(solver_input=None, table_dir=None):
 def initial_condition_grid(x0, theta0, solver_input=None, table_dir=None):
     """Evaluate the normalized initial (no-RF equilibrium) distribution.
 
-    This is what solution plots overlay as "the initial condition", so it
-    must use the same normalization the solver does -- with the phase-space
-    measure ``x_0^2 lambda(theta_0) sin(theta_0)``, not the naive
-    ``x_0^2 sin(theta_0)``.  The ``lambda`` factor is why
-    :func:`collisional_pitch_norm` exists rather than a plain ``sin``
-    integral.
+    This is what the marginal/density plots overlay as "the initial
+    condition", so it must use the same normalization the solver does -- the
+    phase-space measure ``x_0^2 lambda(theta_0) sin(theta_0)`` (the
+    ``lambda`` factor is why :func:`collisional_pitch_norm` exists rather
+    than a plain ``sin`` integral) INCLUDING the gyrophase ``2 pi`` the
+    solver folds into its ``init_norm``, so the full 3-D count is 1.
+    Dropping the ``2 pi`` here makes every "initial" overlay sit a factor
+    of 2 pi above the actual first frame -- which reads as spurious
+    particle loss in the density plots.
 
     Performance: ASGarD reconstruction grids repeat each ``x0`` value along
     the entire pitch axis, so evaluating the nested equilibrium integral per
@@ -563,6 +566,7 @@ def initial_condition_grid(x0, theta0, solver_input=None, table_dir=None):
     """
     x_norm = velocity_equilibrium_norm(solver_input, table_dir)
     theta_norm = collisional_pitch_norm(solver_input, table_dir)
+    gyro = 2.0 * math.pi
 
     x_flat = np.asarray(x0).ravel()
     x_unique, inverse = np.unique(x_flat, return_inverse=True)
@@ -570,7 +574,7 @@ def initial_condition_grid(x0, theta0, solver_input=None, table_dir=None):
         x_unique, solver_input, table_dir
     )
     eq_x = eq_unique[inverse].reshape(np.shape(x0))
-    return eq_x / (theta_norm * x_norm)
+    return eq_x / (gyro * theta_norm * x_norm)
 
 
 # ---------------------------------------------------------------------------
@@ -578,18 +582,81 @@ def initial_condition_grid(x0, theta0, solver_input=None, table_dir=None):
 # ---------------------------------------------------------------------------
 
 
-def bounce_pitch_weight(theta0, solver_input=None, table_dir=None):
-    """Return the bounce-orbit pitch measure ``lambda * sin(theta_0)``.
+def bounce_pitch_quadrature(theta0, solver_input=None, table_dir=None):
+    """Quadrature weights ``W_j ~ integral phi_j(theta) lambda sin(theta) dtheta``.
 
-    Bounce averaging integrates out a particle's position along its orbit,
-    so each midplane pitch bin represents an amount of phase-space volume
-    proportional to ``lambda = v * |cos(theta_0)| * tau_bounce``, where
-    ``tau_bounce`` is what ``L_tab.bin`` stores.
+    ``sum(W * g)`` integrates a reconstructed marginal ``g`` (piecewise
+    linear on the ``theta0`` grid, hat functions ``phi_j``) against the
+    EXACT bounce measure.  The naive alternative -- trapezoid weights times
+    pointwise ``bounce_pitch_weight`` -- steps over the narrow
+    trapped-passing peak of ``L`` (the very peak ``collisional_pitch_norm``
+    must split analytically), and the resulting particle-number error moves
+    with reconstruction resolution: the same solution read at 128 vs 192
+    points differed by 3%, masquerading as particle drift.  Integrating the
+    measure on a sub-grid finer than the L-table's own spacing makes the
+    number resolution-independent, leaving only the solver's true boundary
+    flux.
+
+    Implementation: densely sample ``lambda sin(theta)`` (linear L-table
+    interpolation, so a sub-grid at table resolution captures everything the
+    table knows), fine-trapezoid each sample, and deposit it onto the two
+    enclosing hat functions of the plot grid.
+    """
+    theta0 = np.asarray(theta0, dtype=float)
+    params = table_parameters(table_dir)
+    # Fine enough to resolve both the plot grid and the table's native grid.
+    count = max(8 * theta0.size, 2 * int(params["npitch"]))
+    fine = np.linspace(theta0[0], theta0[-1], count)
+    values = bounce_pitch_weight(fine, solver_input, table_dir)
+    fine_w = np.empty_like(fine)
+    fine_w[0] = 0.5 * (fine[1] - fine[0])
+    fine_w[-1] = 0.5 * (fine[-1] - fine[-2])
+    fine_w[1:-1] = 0.5 * (fine[2:] - fine[:-2])
+    # Deposit each fine sample onto the hat functions of the coarse grid.
+    cell = np.clip(np.searchsorted(theta0, fine, side="right") - 1,
+                   0, theta0.size - 2)
+    span = theta0[cell + 1] - theta0[cell]
+    t = np.clip((fine - theta0[cell]) / span, 0.0, 1.0)
+    weights = np.zeros_like(theta0)
+    np.add.at(weights, cell, fine_w * values * (1.0 - t))
+    np.add.at(weights, cell + 1, fine_w * values * t)
+    return weights
+
+
+def bounce_pitch_weight(theta0, solver_input=None, table_dir=None):
+    """Return the bounce-averaged pitch measure ``lambda(theta_0) * sin(theta_0)``.
+
+    ``theta_0`` is a MIDPLANE pitch angle labeling a whole bounce orbit, not
+    a local velocity-space angle -- the local pitch at orbit position ``l``
+    is fixed by mu/energy conservation:
+    ``sin^2(theta(l)) = (B(l)/B0) sin^2(theta_0)``.  Eliminating the orbit
+    position therefore needs the invariant measure along the Hamiltonian
+    flow -- residence time ``dt = ds/v_parallel`` -- not a metric scale
+    factor.  Converting the local velocity-space element to ``(E, mu)`` and
+    multiplying by the real-space flux-tube element (``~ ds/B(l)``) cancels
+    ``B(l)`` exactly, leaving ``dt`` as the pure orbit-elimination weight;
+    integrated over one bounce it gives ``tau_b = L(theta_0)/x_0``, with
+    ``L`` PURELY GEOMETRIC (this is ``L_tab.bin``, built by
+    ``build_tables.cpp`` from the field-line geometry and trapped/passing
+    classification).  Converting ``(E, mu)`` back to ``(x_0, theta_0)``
+    contributes the remaining ``sin(theta_0) * |cos(theta_0)|``, giving
+    exactly the product returned here.
+
+    ``L`` having no ``x_0`` dependence is not a simplification -- it is the
+    correctness proof that this weight factors cleanly at all.  If table
+    generation ever makes ``L`` speed-dependent, every marginal built on
+    this function (the ``density_*.py`` plots, ``temperature.py``) becomes an
+    uncontrolled approximation; treat that as a correctness regression.
 
     ``cos`` is regularized as ``sqrt(cos^2 + eps_mass^2)`` -- the same
     regularization the solver applies -- so the weight stays strictly
     positive at 90 degrees, where a bounce orbit degenerates to a point and
     the true ``cos`` vanishes.
+
+    For *integrating* against this measure use
+    :func:`bounce_pitch_quadrature`, not pointwise values under a plain
+    trapezoid -- the trapped-passing peak of ``L`` is narrower than a
+    reconstruction grid cell.
     """
     solver_input = solver_input or PATHS.solver_input
     theta0 = np.asarray(theta0, dtype=float)

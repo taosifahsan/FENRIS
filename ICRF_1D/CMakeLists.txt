@@ -50,6 +50,12 @@ find_package(asgard 0.9.0 REQUIRED)
 add_executable(ICRF_1D "${ICRF1D_SOURCE_DIR}/ICRF_1D.cpp")
 target_compile_features(ICRF_1D PRIVATE cxx_std_17)
 target_link_libraries(ICRF_1D PRIVATE asgard::asgard)
+
+# input_data holds initial_condition.hpp -- an *input* that happens to be
+# code.  The compiler's header dependency tracking makes editing it trigger
+# a rebuild, and the solve rule below depends on the binary, so a re-solve.
+
+target_include_directories(ICRF_1D PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/input_data")
 target_compile_options(ICRF_1D PRIVATE
     $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-O3>)
 

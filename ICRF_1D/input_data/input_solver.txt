@@ -3,12 +3,20 @@
 # t = 10 collision times over a 0..8 thermal-velocity domain.
 domain_min    	: 0.0		# Domain start (unit electron thermal velocity)
 domain_max    	: 8		# Domain end (unit electron thermal velocity)
-time		    : 200	# Simulation time (unit electron collision time)
+time		: 200	# Simulation time (unit electron collision time)
 time_step       : 1e-2 		# Time step
 
 -degree        	: 2		    # DG polynomial degree
 -start-levels   : 8		# Sparse grid level (256 cells over 0..8)
--max-levels     : 12		# Adaptive refinement ceiling (4096 cells)
+-max-levels     : 8		# Adaptive ceiling (1024 cells).  Every grid change
+				# forces a dense matrix rebuild + LU whose cost grows
+				# ~dof^3, so the t=200 solve time climbs steeply with
+				# the ceiling: 8 -> 35 s, 10 -> 161 s, 12 -> ~25 min.
+				# Do not drop to 8: the wide first cell violates the
+				# weak df/dv=0 origin condition at O(1) of the local
+				# slope (origin slope +2.7e-3 vs -1.5e-5 at 10),
+				# visible as spikes in the sub-thermal T(v).  Moments
+				# are insensitive (v^2 measure), but the BC is not.
 -adapt          : 1E-8		# Adaptive refinement threshold
 
 K               : 0.1     # Power (normalized)
@@ -21,7 +29,7 @@ m_ion 		: 2.0 3.0 	    # Ion masses (amu)
 n_ion 		: 0.5 0.5   	# Ion densities ratios
 T_ion 		: 1.0 1.0   	# Ion temperatures (in Electron Temp unit)
 
-num_points    	: 10000	  	# Plot sample count
+num_points    	: 1024	  	# Plot sample count
 scale_dist    	: semilogy	# Distribution scale
 scale_temp      : loglog    # Temperature scale
 

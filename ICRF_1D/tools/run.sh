@@ -59,13 +59,14 @@ t=$SECONDS
 pids=()
 timed python3 plot/solution.py    --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
 timed python3 plot/temperature.py --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
-timed python3 plot/diagnostics.py --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
+timed python3 plot/growth.py      --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
+timed python3 plot/moments.py     --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
 timed python3 plot/grid.py        --fig-dir "${figs}" & pids+=($!)
 # wait on each PID: a bare `wait` ignores job failures, this aborts on one
 for pid in "${pids[@]}"; do wait "${pid}"; done
 echo "[time] plotters, parallel wall: $((SECONDS - t)) s"
 
-cp input_data/input_solver.txt "${figs}/"
+cp input_data/input_solver.txt input_data/initial_condition.hpp "${figs}/"
 echo "[time] total: $((SECONDS - t_total)) s"
 echo "saved everything in ${figs}"
 } 2>&1 | tee "${figs}/run.out"

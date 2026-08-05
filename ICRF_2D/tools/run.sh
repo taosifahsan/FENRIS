@@ -60,10 +60,11 @@ timed python3 plot/cache.py --out "${cache}"
 t=$SECONDS
 pids=()
 timed python3 plot/solution.py       --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
-timed python3 plot/vel_smoothed.py   --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
 timed python3 plot/temperature.py    --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
-timed python3 plot/theta_smoothed.py --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
-timed python3 plot/diagnostics.py    --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
+timed python3 plot/density_x.py      --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
+timed python3 plot/density_theta.py  --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
+timed python3 plot/growth.py         --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
+timed python3 plot/moments.py        --cache "${cache}" --fig-dir "${figs}" & pids+=($!)
 timed python3 plot/grid.py           --fig-dir "${figs}" & pids+=($!)
 timed python3 plot/coefficients.py   --fig-dir "${figs}" & pids+=($!)
 timed python3 plot/flux_surface.py   --fig-dir "${figs}" & pids+=($!)
@@ -71,7 +72,7 @@ timed python3 plot/flux_surface.py   --fig-dir "${figs}" & pids+=($!)
 for pid in "${pids[@]}"; do wait "${pid}"; done
 echo "[time] plotters, parallel wall: $((SECONDS - t)) s"
 
-cp input_data/input_solver.txt input_data/input_build.txt "${figs}/"
+cp input_data/input_solver.txt input_data/input_build.txt input_data/initial_condition.hpp "${figs}/"
 echo "[time] total: $((SECONDS - t_total)) s"
 echo "saved everything in ${figs}"
 } 2>&1 | tee "${figs}/run.out"

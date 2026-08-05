@@ -1,27 +1,40 @@
-cut_x_parallel_min : 3.0     # D_RF x_parallel window start
-cut_x_parallel_max : 5.0     # D_RF x_parallel window end
+# Units: x = v/v_th, v_th = sqrt(2 T_e/m_e); time in collision times of that
+# v_th (see the normalization header in src/LHCD_2D.cpp).  The RF window
+# below is ALIGNED with LHCD_1D's deck (same [2, 4] window, same 0.5 height,
+# same 0.01 edge width) so the 1-D and 2-D runs drive the same physical
+# resonance.  Pre-standardization data (old v_th = sqrt(T/m), window [3,5])
+# is archived in output_data_archive_pre_standardization/.
+
+cut_x_parallel_min : 2.0     # D_RF x_parallel window start
+cut_x_parallel_max : 4.0     # D_RF x_parallel window end
 cut_height      : 0.5        # D_RF peak value
 
 # Optional RF cutoff as a fraction of x_max. cut_center >= 1 disables it.
 # smoothing_width controls both the x_parallel-window edges and this cutoff.
 cut_center      : 1.0
-smoothing_width : 0.02
+smoothing_width : 0.01
 
 Zi              : 1.0        # Atomic number
 
-x_max           : 10.0       # x end
+x_max           : 8.5        # x end
 
 # Crank-Nicolson time evolution.
 -step-method    : cn
--dt             : 1.E-3      # Size of Time steps
--time           : 1E-1        # Total Time
--degree         : 2          # DG polynomial degree
+-dt             : 3.5E-3     # Size of Time steps (= the old deck's 1.E-2 in
+                             # the old time unit: t_new = t_old / (2 sqrt 2))
+-time           : 176.78     # Total Time (= the old runs' 5E2 converted by
+                             # the same factor: identical physical duration)
+
+-degree         : 2         # DG polynomial degree
 -start-levels	: 5 5
 -max-levels     : 5 5
 -grid           : sparse     # Simulation mode
 -solver         : gmres
 -precon         : none
--adapt          : 1.E-8
+-adapt          : 4.E-8      # matched to the standardized f scale: f is
+                             # 2 sqrt 2 larger and D_RF sqrt 2 larger than in
+                             # the old convention, so 4e-8 refines where the
+                             # old 1e-8 did
 -isolve-tol     : 1.E-8
 -isolve-iter    : 400
 -isolve-inner   : 400

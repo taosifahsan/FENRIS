@@ -1,28 +1,40 @@
-"""LHCD's quasilinear diffusion tensor.
+"""LHCD's quasilinear diffusion coefficient.
 
-LHCD's coefficients are computed **analytically** from six input-deck
-parameters -- no lookup tables, no compiled generator stage.  That is the one
-structural difference from ``ICRF_2D/plot/coefficients.py``, which reads
-precomputed ``.bin`` tables: same role in the architecture, opposite
-implementation.
+LHCD's coefficients are computed **analytically** from the input deck -- no
+lookup tables, no compiled generator stage.  That is the one structural
+difference from ``ICRF_2D/plot/coefficients.py``, which reads precomputed
+``.bin`` tables: same role in the architecture, opposite implementation.
 
 The physics: LH waves resonate over a band of *parallel* velocities, so the
-diffusion coefficient is a window in ``x_parallel = x cos(theta)`` --
-essentially "on" between two parallel-velocity cutoffs and "off" outside.
-:func:`diffusion_window` builds that scalar window; :func:`ql_coefficients`
-rotates it from the parallel direction into the solver's ``(x, theta)``
-coordinates, which turns one scalar into a symmetric 2-tensor.
+quasilinear operator is a plain one-dimensional diffusion along
+``w = x_parallel = x cos(theta)``,
 
-Cartesian ``(v_parallel, v_perp)`` view, signed-log color -- see
-``plot_common/static.py``.  Reads no snapshots, so this costs nothing to run
-alongside the expensive stages.
+    d/dw ( D_ql(w) df/dw )
 
-Used by:
-  - ``LHCD_2D/plot/diagnostics.py`` -- the boundary diffusion value
-  - ``tools/run.sh``                -- the tensor figure
+and :func:`diffusion_window` is that ``D_ql`` -- essentially "on" between two
+parallel-velocity cutoffs and "off" outside.  :func:`plot_diffusion` draws it
+directly, in the Cartesian ``(v_parallel, v_perp)`` view, where the resonance
+is a vertical band: the operator acts along ``w`` only, so the coefficient is
+constant along every vertical line and the band's edges are the two cutoffs.
+
+**Why there is no tensor figure.**  In the solver's ``(x, theta)`` chart the
+same operator becomes ``div(D . grad f)`` with
+
+    D_xx = D_ql cos^2(theta),   D_x,theta = -D_ql cos(theta) sin(theta),
+    D_theta,theta = D_ql sin^2(theta)
+
+-- the outer product of the parallel unit vector ``(cos, -sin)`` with itself.
+Being rank-1 its determinant vanishes identically, so those three panels
+carry no information beyond ``D_ql`` and the rotation angle: diffusion is
+strictly one-dimensional in velocity space, which is exactly the physics of a
+single resonant wave.  Plotting the scalar says it once instead of three
+times.
+
+Used by: ``tools/run.sh`` (the coefficient figure); ``growth.py`` and
+``solution.py`` import the axis styling and the initial condition from here.
 
 Depends on: :mod:`plot_common.reader` (the deck), :mod:`plot_common.static`
-(drawing).
+(``save_png``).
 """
 
 from __future__ import annotations
@@ -51,13 +63,6 @@ import numpy as np
 
 from plot_common.reader import option_float, read_options
 from plot_common.static import contour2d, save_png
-
-# Panel keys and their LaTeX titles, in display order.
-TENSOR_PANELS = (
-    ("xx", r"$D_{xx}$"),
-    ("xtheta", r"$D_{x\theta}$"),
-    ("thetatheta", r"$D_{\theta\theta}$"),
-)
 
 
 def style_cartesian_axes(ax):
@@ -90,7 +95,7 @@ def smooth_step(x, cut, width):
 
 
 def diffusion_window(x, theta, solver_input=None):
-    """Return the analytic LH quasilinear diffusion magnitude ``D(x, theta)``.
+    """Return the analytic LH quasilinear diffusion magnitude ``D_ql(x, theta)``.
 
     Two multiplied factors:
 
@@ -102,9 +107,10 @@ def diffusion_window(x, theta, solver_input=None):
     2. **An optional outer-speed rolloff.**  ``cut_center < 1`` tapers the
        coefficient off above ``cut_center * x_max``, so RF power is not
        injected right at the domain boundary where it would contaminate the
-       flux measurement.  ``cut_center >= 1`` disables it entirely.
+       flux measurement.  ``cut_center >= 1`` disables it entirely, and then
+       ``D_ql`` is a function of ``x_parallel`` alone.
 
-    All six knobs come from the solver's own deck, so the plotted coefficient
+    All the knobs come from the solver's own deck, so the plotted coefficient
     is the one the run actually used.
     """
     solver_input = solver_input or PATHS.solver_input
@@ -142,50 +148,33 @@ def diffusion_window(x, theta, solver_input=None):
     return height * parallel * x_cutoff
 
 
-def ql_coefficients(x, theta, solver_input=None):
-    """Rotate the scalar diffusion into the ``(x, theta)`` diffusion tensor.
-
-    Diffusion acts purely along the *parallel* direction, so as a tensor in
-    ``(x, theta)`` it is the outer product of the parallel unit vector with
-    itself, scaled by the scalar magnitude.  In these coordinates the parallel
-    direction has components ``(cos(theta), -sin(theta))``, giving
-
-        D_xx        = D cos^2(theta)
-        D_xtheta    = -D cos(theta) sin(theta)
-        D_thetatheta = D sin^2(theta)
-
-    The cross term is negative because increasing ``theta`` moves *away* from
-    the parallel direction.  Being a rank-1 tensor, its determinant vanishes
-    identically -- diffusion is strictly one-dimensional in velocity space,
-    which is exactly the physics of a single resonant wave.
-    """
-    diffusion = diffusion_window(x, theta, solver_input)
-    cosine = np.cos(theta)
-    sine = np.sin(theta)
-    return {
-        "xx": diffusion * cosine**2,
-        "xtheta": -diffusion * cosine * sine,
-        "thetatheta": diffusion * sine**2,
-    }
-
-
 def initial_condition_grid(x, theta=None):
-    """The Maxwellian initial condition, ``(2 pi)^-3/2 exp(-x^2/2)``.
+    """The Maxwellian initial condition, ``pi^-3/2 exp(-x^2)``.
 
-    Isotropic, hence ``theta``-independent -- accepted only so the signature
-    matches ICRF's, whose initial condition genuinely depends on pitch angle
-    through its bounce-orbit normalization.
+    Standard units ``x = v / sqrt(2T/m)`` (see src/LHCD_2D.cpp's
+    normalization header); the 2 pi * x^2 sin(theta) integral of this is
+    exactly 1.  Isotropic, hence ``theta``-independent -- accepted only so
+    the signature matches ICRF's, whose initial condition genuinely depends
+    on pitch angle through its bounce-orbit normalization.
     """
     del theta
-    return (2.0 * math.pi) ** (-1.5) * np.exp(-0.5 * np.asarray(x)**2)
+    return math.pi ** (-1.5) * np.exp(-np.asarray(x)**2)
 
 
-def plot_tensor(solver_input=None, points=256):
-    """Three-panel figure: the diffusion tensor's independent components.
+def plot_diffusion(solver_input=None, points=256):
+    """The scalar ``D_ql`` the quasilinear operator diffuses with, in Cartesian.
 
     Evaluated on a synthetic ``(speed, pitch)`` grid spanning the full domain
-    rather than on a reconstruction grid -- the coefficient is an analytic
-    function of coordinates, so it needs no snapshot data at all.
+    and mapped to ``(v_parallel, v_perp)`` -- the coefficient is an analytic
+    function of coordinates, so it needs no snapshot data at all and costs
+    nothing to run alongside the expensive stages.
+
+    Reading it: the resonance appears as a vertical band, because ``D_ql``
+    depends on ``x_parallel = x cos(theta)``.  Vertical means the coefficient
+    is genuinely independent of ``v_perp`` -- which is the whole reason the
+    perpendicular tail in ``density_vperp.py`` cannot come from the RF
+    directly.  With ``cut_center < 1`` an outer-speed rolloff also curves the
+    band off at large total speed.
     """
     solver_input = solver_input or PATHS.solver_input
     options = read_options(solver_input)
@@ -193,26 +182,34 @@ def plot_tensor(solver_input=None, points=256):
     speed = np.linspace(0.0, x_max, points)
     pitch = np.linspace(0.0, math.pi, points)
     x, theta = np.meshgrid(speed, pitch, indexing="ij")
-    coeffs = ql_coefficients(x, theta, solver_input)
 
+    diffusion = diffusion_window(x, theta, solver_input)
     vpar, vperp = x * np.cos(theta), x * np.sin(theta)
-    fig, axes = plt.subplots(1, 3, figsize=(11.2, 3.6), constrained_layout=True)
-    for ax, (key, title) in zip(axes, TENSOR_PANELS):
-        contour2d(fig, ax, vpar, vperp, coeffs[key], title=title,
-                  style_axes=style_cartesian_axes)
-    fig.suptitle("LHCD quasilinear diffusion tensor", fontsize=14)
+
+    fig, ax = plt.subplots(figsize=(5.8, 4.6), constrained_layout=True)
+    contour2d(
+        fig, ax, vpar, vperp, diffusion,
+        style_axes=style_cartesian_axes,
+        title=(
+            r"LHCD quasilinear coefficient $D_{ql}$"
+            "\n"
+            r"$\frac{\partial}{\partial w}"
+            r"\left(D_{ql}\frac{\partial f}{\partial w}\right)$,"
+            r"  $w=v_\parallel$"
+        ),
+    )
     return fig
 
 
 def main():
-    """CLI entry point: render the static tensor figure (no movie)."""
+    """CLI entry point: render the static coefficient figure (no movie)."""
     parser = argparse.ArgumentParser(description="LHCD coefficient plot")
     parser.add_argument("--fig-dir", default=str(PATHS.figures))
     parser.add_argument("-n", "--points", type=int, default=256)
     parser.add_argument("--dpi", type=int, default=220)
     args = parser.parse_args()
-    save_png(plot_tensor(points=args.points), args.fig_dir,
-             "diffusion_tensor", dpi=args.dpi)
+    save_png(plot_diffusion(points=args.points), args.fig_dir,
+             "diffusion_coefficient", dpi=args.dpi)
 
 
 if __name__ == "__main__":
