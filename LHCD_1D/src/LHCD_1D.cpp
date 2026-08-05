@@ -157,7 +157,11 @@ pde_scheme make_pde(asgard::prog_opts options)
                 func[i] =  -sign(v[i]) * pow(I.val(v[i]), 2);
         };
         
-        term_md Bdiv{term_div(B),};
+        // bothsides: the advective flux is fixed to zero at both walls.
+        // Previously this bracket was left free with no cancelling Robin --
+        // a latent leak, benign only because f(+-v_max) is tiny; the same
+        // defect class caused the 2-D projects' particle drift.
+        term_md Bdiv{term_div(B, boundary_type::bothsides),};
         pde += term_md({Bdiv});
 
     }

@@ -561,7 +561,12 @@ asgard::pde_scheme<P> make_icrf_pde(asgard::prog_opts options, Tables const* tab
             for (std::size_t i = 0; i < x.size(); ++i)
                 value[i] = -cf.A_cv(x[i]);
         };
-        pde += term_md({term_div(neg_A_cv, flux::upwind),
+        // bothsides: the drag flux is fixed to zero at both radial walls
+        // (bracket omitted).  Replaces the former set_right_robin(A_cv):
+        // deleting the drag bracket and cancelling it with a Robin worth
+        // A_cv(x_max) assemble the same matrix (verified bit-for-bit on the
+        // 1-D solvers); deletion has no coefficient to get wrong.
+        pde += term_md({term_div(neg_A_cv, flux::upwind, bc::bothsides),
                         term_identity{}});
     }
 
@@ -597,21 +602,17 @@ asgard::pde_scheme<P> make_icrf_pde(asgard::prog_opts options, Tables const* tab
         // a plain Robin with no theta dependence.  Hence bc::bothsides on
         // the QL divergences (see the QL block) plus this Robin.
         //
-        // On the VALUE: asgard's Robin adds a boundary FLUX, so it takes the
-        // mass-weighted drag coefficient -- the same quantity handed to the
-        // drag term as neg_A_cv -- not the log-derivative A_cv/B_cv.  A_cv
-        // is already mass-weighted: A_cv/x^2 -> 1/x^2 and B_cv/x^2 -> 1/x^3
-        // at large x, exactly the physical coefficients (compare LHCD_2D,
-        // whose drag literal 0.5 is x^2 * 1/(2x^2), constant only because
-        // its A is a pure power).  Getting this wrong is not subtle:
-        // A_cv/B_cv = 2*x_max overshoots ~14x and the solve diverges;
-        // A_cv/x^2 undershoots 36x and drifts to +5% where A_cv gives -0.35%.
-        //
-        // The left end needs nothing: A_cv ~ x^2 Psi(x) -> 0 as x -> 0, so
-        // the flux vanishes there on its own.
+        // MECHANISM: every operator's boundary treatment is a surface
+        // bracket; bc::bothsides omits the bracket (flux fixed to zero),
+        // bc::none fills it from the interior trace (open), and a Robin
+        // re-adds one worth r*f.  The drag term above is bothsides, so its
+        // bracket is deleted outright -- equivalent to the former
+        // set_right_robin(A_cv(x_max)) counter-bracket, but with no
+        // cancellation value to get wrong.  (History, measured at level 4,
+        // x_max = 6: robin = A_cv/B_cv = 2*x_max overshoots ~14x and the
+        // solve diverges; A_cv/x^2 undershoots 36x and drifts to +5%;
+        // A_cv and plain bothsides agree to solver tolerance.)
         // ------------------------------------------------------------------
-        div_grad_xc.set_left_robin(P{0.0});
-        div_grad_xc.set_right_robin(cf.A_cv(x_max));
         
         pde += term_md({div_grad_xc, term_identity{}});
 

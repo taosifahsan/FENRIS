@@ -263,7 +263,12 @@ asgard::pde_scheme<P> make_pde(asgard::prog_opts options)
                 f[i] = - pow(v[i], 2) * plasma.eta(v[i]);
             }
         };
-        pde += term_1d({term_div(eta_v2)}); // v^2 q = d/dv[ - v^2 eta(v) f]
+        // bothsides: drag flux fixed to zero at both walls (bracket omitted).
+        // Replaces the former set_right_robin(v_max^2 eta(v_max)) -- the two
+        // assemble the SAME matrix (verified bit-identical over a full
+        // t = 200 run), since that robin value was exactly the drag
+        // bracket's wall coefficient.
+        pde += term_1d({term_div(eta_v2, boundary_type::bothsides)});
     }
     
     // s = - 1/v^2 d/dv[ zeta(v) v^2 df/fv)]
@@ -280,10 +285,6 @@ asgard::pde_scheme<P> make_pde(asgard::prog_opts options)
                 term_div(zeta_v2, boundary_type::bothsides), // v^2 r = d/dv[ - v^2 zeta(v) s]
                 term_grad(v2, boundary_type::none) // v^2 s = v^2 df/dv
         });
-        // boundary conditions
-        P const right =  pow(v_max, 2) * plasma.eta(v_max);
-        div_grad.set_right_robin(right);
-
         P const inv_dv = 1.0/pde.cell_size(asgard::dimension_id{0});
         div_grad.set_penalty(inv_dv);
         

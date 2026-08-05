@@ -162,21 +162,26 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
     
     // Collision terms: x components.
     {
-        // Drift term: -1/x^2 d[x^2*(-1/2x^2)f]/dx.
-        pde += term_md({term_div(-0.5, asgard::flux_type::upwind),
+        // Drift term: -1/x^2 d[x^2*(-1/2x^2)f]/dx.  bothsides: the drag
+        // flux is fixed to zero at both radial walls (its boundary bracket
+        // is omitted from the operator), which together with the closed
+        // diffusive and QL fluxes below makes the wall exactly leakproof.
+        pde += term_md({term_div(-0.5, asgard::flux_type::upwind,
+                                 asgard::boundary_type::bothsides),
             term_identity{}});
         
         // Diffusion: s=1/x^2 d/dx(x^2 zeta q), D_c = 1/(4x^3) in the
-        // standard sqrt(2T/m) units (see the normalization header).  The
-        // Robin coefficient stays 0.5: it cancels the drag term's boundary
-        // flux x^2 A f = f/2, which the standardization leaves unchanged.
+        // standard sqrt(2T/m) units (see the normalization header).
+        // (Formerly this chain carried set_*_robin(0.5), the counter-bracket
+        // to the drag term's free boundary flux x^2 A f = f/2.  With the
+        // drag term itself now bothsides, its bracket is deleted rather
+        // than cancelled -- the assembled matrix is identical, verified
+        // bit-for-bit on the 1-D solvers and to solver tolerance in 2-D.)
         term_1d div_grad_x({
             term_div(-0.25, asgard::flux_type::upwind,
                      asgard::boundary_type::bothsides),
             term_grad(x_linear),
         });
-        div_grad_x.set_left_robin(P{0.5});
-        div_grad_x.set_right_robin(P{0.5});
 
         P const inv_dx = P{1} / pde.cell_size(asgard::dimension_id{0});
         pde += term_md({div_grad_x, term_identity{}});
@@ -257,8 +262,8 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
     // Plain conservative divergences. The PDE mass applies
     // 1/(x^2 sin(theta)) to the completed flux divergence.
     // bc::bothsides closes the QL flux at the domain edges.  Required
-    // together with the collisional Robin above (set_*_robin(0.5), which is
-    // this project's mass-weighted drag x^2 * 1/(2x^2)).  The RF window is a
+    // together with the drag and diffusion brackets above being closed
+    // (bothsides on both collisional terms).  The RF window is a
     // band in x_parallel, so it is still LIVE on part of the outer wall --
     // at x = x_max the resonance sits at cos(theta) = x_par/x, e.g. D_ql =
     // 0.5 at theta ~ 68 deg for x_max = 8.5 -- and cut_center >= 1 leaves it
