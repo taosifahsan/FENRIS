@@ -578,10 +578,38 @@ asgard::pde_scheme<P> make_icrf_pde(asgard::prog_opts options, Tables const* tab
             term_div(neg_B_cv, flux::upwind, bc::bothsides),
             term_grad(mass_x),
         });
-        // Zero TOTAL flux at the wall: B_cv f' + A_cv f = 0.  The chain
-        // already carries B_cv, so the Robin supplies the drag flux A_cv --
-        // a flux, not a log-derivative (LHCD_2D's 0.5 is likewise its drag
-        // coefficient).  A_cv -> 0 at the origin, hence 0 on the left.
+        // ------------------------------------------------------------------
+        // Zero TOTAL flux at the outer wall.
+        //
+        // Steady state is zero FLUX, not zero gradient: with
+        //     Gamma_x = (B_cv + D^QL_xx) df/dx + D^QL_xth df/dth + A_cv f,
+        // homogeneous Neumann (df/dx = 0) leaves the drag and quasilinear
+        // fluxes uncancelled at the boundary.  Measured: that MANUFACTURES
+        // particles once the tail reaches the wall -- +63% by t = 100
+        // (level 5, x_max = 6), still accelerating, and worse under
+        // refinement.  The condition we want is Gamma_x = Gamma_theta = 0.
+        //
+        // Those look coupled (Gamma_x contains df/dtheta), but the QL tensor
+        // is rank-1 -- B0*F0 = C0*E0, enforced by construction below -- so
+        // zeroing BOTH components forces v.grad(f) = 0 and the entire QL
+        // flux drops out.  What survives is purely collisional,
+        //     B_cv df/dx + A_cv f = 0,
+        // a plain Robin with no theta dependence.  Hence bc::bothsides on
+        // the QL divergences (see the QL block) plus this Robin.
+        //
+        // On the VALUE: asgard's Robin adds a boundary FLUX, so it takes the
+        // mass-weighted drag coefficient -- the same quantity handed to the
+        // drag term as neg_A_cv -- not the log-derivative A_cv/B_cv.  A_cv
+        // is already mass-weighted: A_cv/x^2 -> 1/x^2 and B_cv/x^2 -> 1/x^3
+        // at large x, exactly the physical coefficients (compare LHCD_2D,
+        // whose drag literal 0.5 is x^2 * 1/(2x^2), constant only because
+        // its A is a pure power).  Getting this wrong is not subtle:
+        // A_cv/B_cv = 2*x_max overshoots ~14x and the solve diverges;
+        // A_cv/x^2 undershoots 36x and drifts to +5% where A_cv gives -0.35%.
+        //
+        // The left end needs nothing: A_cv ~ x^2 Psi(x) -> 0 as x -> 0, so
+        // the flux vanishes there on its own.
+        // ------------------------------------------------------------------
         div_grad_xc.set_left_robin(P{0.0});
         div_grad_xc.set_right_robin(cf.A_cv(x_max));
         
@@ -642,6 +670,14 @@ asgard::pde_scheme<P> make_icrf_pde(asgard::prog_opts options, Tables const* tab
         // which do not preserve the nonlinear identity B*F=C*E.
         // These operators act on the conservative density
         // x^2*sin(theta)*lambda*f.
+        // bc::bothsides closes the QL flux at the domain edges, and is
+        // required TOGETHER with the collisional Robin above: at the wall the
+        // QL flux dominates (D^QL_xx ~ 17 vs B_cv ~ 0.1, and cut_center >= 1
+        // leaves the RF live all the way out), so leaving these as bc::none
+        // (outflow) bleeds particles however good the collisional condition
+        // is -- measured -11.6% by t = 200 with the Robin alone, versus
+        // -0.4% with both.  At x = 0 and theta = 0, pi the QL flux vanishes
+        // geometrically, so only x_max binds.
         term_md div_dx({term_div{P{-1.0}, flux::upwind, bc::bothsides},
                         term_volume{P{1.0}}});
         term_md div_theta({term_volume{P{1.0}},

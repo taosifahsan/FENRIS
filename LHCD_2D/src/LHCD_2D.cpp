@@ -256,13 +256,31 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
 
     // Plain conservative divergences. The PDE mass applies
     // 1/(x^2 sin(theta)) to the completed flux divergence.
+    // bc::bothsides closes the QL flux at the domain edges.  Required
+    // together with the collisional Robin above (set_*_robin(0.5), which is
+    // this project's mass-weighted drag x^2 * 1/(2x^2)).  The RF window is a
+    // band in x_parallel, so it is still LIVE on part of the outer wall --
+    // at x = x_max the resonance sits at cos(theta) = x_par/x, e.g. D_ql =
+    // 0.5 at theta ~ 68 deg for x_max = 8.5 -- and cut_center >= 1 leaves it
+    // unattenuated.  Left as bc::none (outflow) that flux simply escapes.
+    //
+    // Zeroing BOTH components is what makes the edge condition tractable:
+    // D_ql = D_w e_par e_par^T is rank-1, so vanishing in both directions
+    // forces e_par.grad(f) = 0 and the QL flux drops out entirely, leaving
+    // the purely collisional B df/dx + A f = 0 that the Robin implements.
+    // Otherwise Gamma_x couples df/dtheta and no scalar Robin exists.
+    // (ICRF_2D carries the same fix; see its longer note there for the
+    // measured failure modes -- Neumann manufactures particles, and the
+    // Robin without this bleeds them.)
     term_md div_x({
-        term_div{P{-1.0}, asgard::flux_type::upwind},
+        term_div{P{-1.0}, asgard::flux_type::upwind,
+                 asgard::boundary_type::bothsides},
         term_volume{P{1.0}}
     });
     term_md div_theta({
         term_volume{P{1.0}},
-        term_div{P{-1.0}, asgard::flux_type::upwind}
+        term_div{P{-1.0}, asgard::flux_type::upwind,
+                 asgard::boundary_type::bothsides}
     });
 
     auto K_xx_theta = [](std::vector<P> const &theta,
