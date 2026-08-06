@@ -267,16 +267,20 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
     // band in x_parallel, so it is still LIVE on part of the outer wall --
     // at x = x_max the resonance sits at cos(theta) = x_par/x, e.g. D_ql =
     // 0.5 at theta ~ 68 deg for x_max = 8.5 -- and cut_center >= 1 leaves it
-    // unattenuated.  Left as bc::none (outflow) that flux simply escapes.
+    // unattenuated.  If left as bc::none (outflow), that flux simply escapes.
     //
     // Zeroing BOTH components is what makes the edge condition tractable:
     // D_ql = D_w e_par e_par^T is rank-1, so vanishing in both directions
     // forces e_par.grad(f) = 0 and the QL flux drops out entirely, leaving
-    // the purely collisional B df/dx + A f = 0 that the Robin implements.
-    // Otherwise Gamma_x couples df/dtheta and no scalar Robin exists.
+    // the purely collisional B df/dx + A f = 0.  That relation is not a term
+    // in the operator: it is what the sealed drag and diffusion brackets
+    // above impose between them, since only their SUM is constrained to
+    // vanish at the wall.  Otherwise Gamma_x couples df/dtheta and no scalar
+    // edge condition exists.
     // (ICRF_2D carries the same fix; see its longer note there for the
     // measured failure modes -- Neumann manufactures particles, and the
-    // Robin without this bleeds them.)
+    // collisional condition alone, back when it was written as an explicit
+    // Robin, bleeds them.)
     term_md div_x({
         term_div{P{-1.0}, asgard::flux_type::upwind,
                  asgard::boundary_type::bothsides},

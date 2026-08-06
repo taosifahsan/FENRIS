@@ -1,0 +1,94 @@
+\contentsline {section}{\numberline {1}Executive summary --- the reference card}{4}{section.1}%
+\contentsline {paragraph}{The one sign convention.}{4}{section*.2}%
+\contentsline {paragraph}{Where boundary conditions live.}{4}{section*.3}%
+\contentsline {paragraph}{What each flag does.}{4}{section*.4}%
+\contentsline {paragraph}{The chain rule (the central result).}{4}{section*.5}%
+\contentsline {paragraph}{The sum rule.}{5}{section*.6}%
+\contentsline {paragraph}{Robin.}{5}{section*.7}%
+\contentsline {paragraph}{Mass.}{5}{section*.8}%
+\contentsline {paragraph}{The five things that will bite you.}{5}{section*.9}%
+\contentsline {section}{\numberline {2}From the weak form to matrix blocks}{6}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Notation, and the one fact everything rests on}{6}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}The one sign convention}{6}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}One term, one matrix}{6}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}The basis, and where $1/h$ and $2/h$ come from}{7}{subsection.2.4}%
+\contentsline {subsection}{\numberline {2.5}The four trace projectors}{8}{subsection.2.5}%
+\contentsline {subsection}{\numberline {2.6}The container, and the interior of a \texttt {div}}{8}{subsection.2.6}%
+\contentsline {subsection}{\numberline {2.7}Telescoping: only two blocks can break conservation}{8}{subsection.2.7}%
+\contentsline {section}{\numberline {3}What each \texttt {boundary\_type} does at assembly}{9}{section.3}%
+\contentsline {subsection}{\numberline {3.1}The enum}{9}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}\texttt {div}}{9}{subsection.3.2}%
+\contentsline {paragraph}{\texttt {none} --- free.}{10}{section*.10}%
+\contentsline {paragraph}{\texttt {bothsides} --- sealed.}{10}{section*.11}%
+\contentsline {paragraph}{The ``dirichlet flux'' trap.}{10}{section*.12}%
+\contentsline {paragraph}{\texttt {left} / \texttt {right}.}{10}{section*.13}%
+\contentsline {paragraph}{\texttt {periodic}.}{10}{section*.14}%
+\contentsline {subsection}{\numberline {3.3}Where the coefficient is sampled --- and why it sometimes does not matter}{10}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}\texttt {grad}: the flag is flipped}{11}{subsection.3.4}%
+\contentsline {paragraph}{What the flip accomplishes.}{11}{section*.15}%
+\contentsline {subsection}{\numberline {3.5}\texttt {penalty}: \texttt {bothsides} adds instead of deletes}{12}{subsection.3.5}%
+\contentsline {subsection}{\numberline {3.6}Inhomogeneous wall data is a source vector, not a matrix change}{13}{subsection.3.6}%
+\contentsline {section}{\numberline {4}Chains: the matrix product, and one condition per factor}{13}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Why a second-order term needs two traces}{13}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}The chain is a real matrix product, formed at build time}{14}{subsection.4.2}%
+\contentsline {paragraph}{A caveat about the product.}{14}{section*.16}%
+\contentsline {paragraph}{Chain hygiene.}{14}{section*.17}%
+\contentsline {subsection}{\numberline {4.3}The four pairings}{14}{subsection.4.3}%
+\contentsline {paragraph}{(i) Neumann --- zero flux --- the sealed pair.}{15}{section*.18}%
+\contentsline {paragraph}{(ii) Dirichlet $f = 0$ --- the open pair.}{15}{section*.19}%
+\contentsline {paragraph}{(iii) Both prescribed --- over-determined.}{15}{section*.20}%
+\contentsline {paragraph}{(iv) Neither prescribed --- under-determined.}{15}{section*.21}%
+\contentsline {paragraph}{One-sided flags are local.}{15}{section*.22}%
+\contentsline {subsection}{\numberline {4.4}Deriving the rule from dissipativity}{15}{subsection.4.4}%
+\contentsline {paragraph}{Interior.}{15}{section*.23}%
+\contentsline {paragraph}{The wall term, in one formula.}{16}{section*.24}%
+\contentsline {subsection}{\numberline {4.5}The parity mnemonic, as a corollary}{16}{subsection.4.5}%
+\contentsline {section}{\numberline {5}The sum rule across independent terms}{17}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Statement}{17}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Derivation}{17}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Three regimes}{18}{subsection.5.3}%
+\contentsline {paragraph}{Emergent Robin.}{18}{section*.25}%
+\contentsline {paragraph}{Sealing a set with no $f'$ channel pins $f$, not $f'$.}{18}{section*.26}%
+\contentsline {paragraph}{Sealing one diffusion channel silences all of them.}{18}{section*.27}%
+\contentsline {subsection}{\numberline {5.4}The sum is signed, and strictly local to the wall}{18}{subsection.5.4}%
+\contentsline {paragraph}{Signed.}{18}{section*.28}%
+\contentsline {paragraph}{Local.}{18}{section*.29}%
+\contentsline {subsection}{\numberline {5.5}Weakly imposed and converging, not exact}{19}{subsection.5.5}%
+\contentsline {section}{\numberline {6}Robin conditions}{19}{section.6}%
+\contentsline {subsection}{\numberline {6.1}The Robin argument is a flux coefficient}{19}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Sign convention and exact equivalence to sealing}{20}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Dissipativity: the sign of $r$}{20}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}Why sealing is preferable to the Robin spelling}{21}{subsection.6.4}%
+\contentsline {section}{\numberline {7}Mass, Jacobians, and what your coefficient really means}{21}{section.7}%
+\contentsline {paragraph}{Adaptivity.}{22}{section*.30}%
+\contentsline {section}{\numberline {8}Multiple dimensions: \texttt {term\_md}}{22}{section.8}%
+\contentsline {paragraph}{Sealing a 1-D factor seals the whole multi-dimensional term.}{22}{section*.31}%
+\contentsline {paragraph}{Boundary conditions live in exactly one direction per term.}{22}{section*.32}%
+\contentsline {subsection}{\numberline {8.1}Why the $\theta $-direction flux often vanishes geometrically}{23}{subsection.8.1}%
+\contentsline {section}{\numberline {9}Design recipe: choosing flags for a new term}{23}{section.9}%
+\contentsline {subsection}{\numberline {9.1}The procedure}{23}{subsection.9.1}%
+\contentsline {subsection}{\numberline {9.2}Worked cases}{24}{subsection.9.2}%
+\contentsline {subsection}{\numberline {9.3}The audit}{24}{subsection.9.3}%
+\contentsline {section}{\numberline {10}Pitfalls}{25}{section.10}%
+\contentsline {paragraph}{P1. Nothing validates flag combinations.}{25}{section*.33}%
+\contentsline {paragraph}{P2. Conservation diagnostics do not catch the ill-posed pair.}{25}{section*.34}%
+\contentsline {paragraph}{P3. A one-sided bad flag corrupts the whole solution, not just its wall.}{25}{section*.35}%
+\contentsline {paragraph}{P4. \texttt {flux\_type::none} is silently \texttt {central}.}{26}{section*.36}%
+\contentsline {paragraph}{P5. Coefficients are sampled at the endpoints, so a vanishing Jacobian makes flags inert.}{26}{section*.37}%
+\contentsline {paragraph}{P6. A negative coefficient on an \emph {individual} diffusion term is an interior instability.}{26}{section*.38}%
+\contentsline {paragraph}{P7. A deck file is only read when passed with \texttt {-if} / \texttt {-infile}.}{26}{section*.39}%
+\contentsline {paragraph}{P8. \texttt {div(bothsides)} plus a penalty is over-determined.}{26}{section*.40}%
+\contentsline {paragraph}{P9. Free flux at an inflow wall.}{26}{section*.41}%
+\contentsline {paragraph}{P10. Measure wall slopes off the DG polynomial, not off a plot grid.}{27}{section*.42}%
+\contentsline {paragraph}{P11 \textcolor {red!60!black}{\textsc {[unresolved]}}{}.}{27}{section*.43}%
+\contentsline {section}{\numberline {11}Verification}{27}{section.11}%
+\contentsline {subsection}{\numberline {11.1}The Neumann pair against exact solutions (\S \ref {sec:four}(i))}{27}{subsection.11.1}%
+\contentsline {subsection}{\numberline {11.2}The Dirichlet pair against exact solutions (\S \ref {sec:four}(ii))}{27}{subsection.11.2}%
+\contentsline {subsection}{\numberline {11.3}The sum rule, all eight sealing combinations (\S \ref {sec:sum})}{28}{subsection.11.3}%
+\contentsline {subsection}{\numberline {11.4}Signed and local (\S \ref {sec:signedlocal})}{29}{subsection.11.4}%
+\contentsline {subsection}{\numberline {11.5}Robin equivalence and the analytic steady state (\S \ref {sec:robin})}{29}{subsection.11.5}%
+\contentsline {subsection}{\numberline {11.6}All six chain pairings, refined (\S \ref {sec:four})}{29}{subsection.11.6}%
+\contentsline {subsection}{\numberline {11.7}The negative-diffusion control (\S \ref {sec:pitfalls}, P6)}{30}{subsection.11.7}%
+\contentsline {subsection}{\numberline {11.8}Corrections to earlier claims}{30}{subsection.11.8}%
+\contentsline {subsection}{\numberline {11.9}Recommended permanent regression checks}{31}{subsection.11.9}%
+\contentsline {section}{\numberline {12}What to remember}{31}{section.12}%

@@ -570,7 +570,7 @@ asgard::pde_scheme<P> make_icrf_pde(asgard::prog_opts options, Tables const* tab
                         term_identity{}});
     }
 
-    // (C2) collisional B : x0-diffusion, collisional zero-flux Robin + penalty
+    // (C2) collisional B : x0-diffusion, sealed to zero flux, + penalty
     {
         auto neg_B_cv = [cf](std::vector<P> const& x,
                              std::vector<P>& value) {
@@ -578,7 +578,9 @@ asgard::pde_scheme<P> make_icrf_pde(asgard::prog_opts options, Tables const* tab
                 value[i] = -cf.B_cv(x[i]);
         };
         
-        // Homogeneous Neumann (f_x=0) at both radial boundaries.
+        // div sealed, grad left free.  Taken in isolation that fixes this
+        // term's own flux, B_cv df/dx = 0; it is NOT the wall condition,
+        // which is the sum over all sealed terms -- see the note below.
         term_1d div_grad_xc({
             term_div(neg_B_cv, flux::upwind, bc::bothsides),
             term_grad(mass_x),
@@ -599,14 +601,21 @@ asgard::pde_scheme<P> make_icrf_pde(asgard::prog_opts options, Tables const* tab
         // zeroing BOTH components forces v.grad(f) = 0 and the entire QL
         // flux drops out.  What survives is purely collisional,
         //     B_cv df/dx + A_cv f = 0,
-        // a plain Robin with no theta dependence.  Hence bc::bothsides on
-        // the QL divergences (see the QL block) plus this Robin.
+        // a Robin-type relation with no theta dependence.  Hence
+        // bc::bothsides on the QL divergences (see the QL block) AND on both
+        // collisional terms.
+        //
+        // Note that relation is nowhere written as a term.  Sealing several
+        // divergences constrains only their SUM at the wall, so sealing the
+        // drag (A_cv f) and this diffusion (B_cv df/dx) together is exactly
+        // what imposes A_cv f + B_cv df/dx = 0.  The Robin is emergent, not
+        // assembled.
         //
         // MECHANISM: every operator's boundary treatment is a surface
         // bracket; bc::bothsides omits the bracket (flux fixed to zero),
         // bc::none fills it from the interior trace (open), and a Robin
-        // re-adds one worth r*f.  The drag term above is bothsides, so its
-        // bracket is deleted outright -- equivalent to the former
+        // would re-add one worth r*f.  The drag term above is bothsides, so
+        // its bracket is deleted outright -- equivalent to the former
         // set_right_robin(A_cv(x_max)) counter-bracket, but with no
         // cancellation value to get wrong.  (History, measured at level 4,
         // x_max = 6: robin = A_cv/B_cv = 2*x_max overshoots ~14x and the
@@ -672,13 +681,14 @@ asgard::pde_scheme<P> make_icrf_pde(asgard::prog_opts options, Tables const* tab
         // These operators act on the conservative density
         // x^2*sin(theta)*lambda*f.
         // bc::bothsides closes the QL flux at the domain edges, and is
-        // required TOGETHER with the collisional Robin above: at the wall the
-        // QL flux dominates (D^QL_xx ~ 17 vs B_cv ~ 0.1, and cut_center >= 1
-        // leaves the RF live all the way out), so leaving these as bc::none
-        // (outflow) bleeds particles however good the collisional condition
-        // is -- measured -11.6% by t = 200 with the Robin alone, versus
-        // -0.4% with both.  At x = 0 and theta = 0, pi the QL flux vanishes
-        // geometrically, so only x_max binds.
+        // required TOGETHER with the sealed collisional terms above: at the
+        // wall the QL flux dominates (D^QL_xx ~ 17 vs B_cv ~ 0.1, and
+        // cut_center >= 1 leaves the RF live all the way out), so leaving
+        // these as bc::none (outflow) bleeds particles however good the
+        // collisional condition is -- measured -11.6% by t = 200 with the
+        // collisional condition alone (then written as an explicit Robin),
+        // versus -0.4% with both.  At x = 0 and theta = 0, pi the QL flux
+        // vanishes geometrically, so only x_max binds.
         term_md div_dx({term_div{P{-1.0}, flux::upwind, bc::bothsides},
                         term_volume{P{1.0}}});
         term_md div_theta({term_volume{P{1.0}},
