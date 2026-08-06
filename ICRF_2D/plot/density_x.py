@@ -1,9 +1,9 @@
 """The conserved speed density ``n(x_0)`` and the shared reduction machinery.
 
 Owns the marginal reduction of the 2-D solution: the ``_integral_spec`` /
-:func:`derive` machinery lives here, and ``density_theta.py`` and
-``temperature.py`` import it (one reduction pass covers all three when run
-from the same cache).  By deliberate convention (see
+:func:`derive` machinery lives here, and ``temperature.py`` imports it (one
+reduction pass covers both when run from the same cache).  By deliberate
+convention (see
 ``bounce_pitch_weight``'s docstring in ``coefficients.py``) each reduction
 inside :func:`derive` carries only the ELIMINATED coordinate's measure
 factor, never the surviving one's -- that keeps the shape-preserving
@@ -16,11 +16,10 @@ site, producing the true conserved density
 
 whose *area is the full 3-D particle count* -- gyrophase ``2 pi``
 included -- exactly 1 at t=0 by the initial-condition normalization
-(the same convention as LHCD_2D).  ``integral n dx_0`` equals
-``density_theta.py``'s ``integral n dtheta_0`` frame by frame, and both are
-``2 pi *`` ``diagnostics.py``'s number moment.  The multiplication happens here at the
-call site, not inside the shared reduction -- both quantities are
-legitimate and different callers need each.
+(the same convention as LHCD_2D); ``integral n dx_0`` is ``2 pi *``
+``moments.py``'s number moment, frame by frame.  The multiplication happens
+here at the call site, not inside the shared reduction -- both quantities
+are legitimate and different callers need each.
 
 Drawn on a signed-log y-axis, matching the shape plots: the density spans
 decades, and :func:`plot_common.static.line1d` splits any negative
@@ -29,8 +28,8 @@ measure's zero at ``x_0 = 0`` dives below the display floor.
 
 Used by: ``tools/run.sh`` (one of the parallel plotter processes).
 
-Used also by: ``density_theta.py`` and ``temperature.py``, which import
-:func:`derive` (and ``FIGSIZE``) from here.
+Used also by: ``temperature.py``, which imports :func:`derive` (and
+``FIGSIZE``) from here.
 
 Depends on: ``coefficients.py`` (the bounce weight and the initial
 condition), :mod:`plot_common.reader` (the cache), :mod:`plot_common.static`
@@ -228,7 +227,7 @@ def derive_density(cache):
     """Weight the pitch-integrated marginal into the conserved density n(x_0).
 
     Reuses :func:`derive` above (one reduction pass, shared with
-    ``density_theta.py`` and ``temperature.py``) and multiplies each frame by
+    ``temperature.py``) and multiplies each frame by
     the surviving-coordinate measure ``x_0^2``.  Also integrates each frame's
     density so the drawing can print the running particle number -- the
     quantity whose conservation this plot exists to display.
