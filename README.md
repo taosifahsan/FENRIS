@@ -9,10 +9,19 @@ theory-based Fokker-Planck equations for fusion plasma. Namely,
 4. ICRF_2D solves ion-cyclotron radio frequency minority heating in two dimensions
 5. plot_common is there for shared plot/animation methods used across files.
 
+INPUTS:
+Inputs of the solvers are handled in input_data folder. 
+1. input_solver.txt takes in necessary input to run the solver code.
+2. initial_condition.hpp is a header c++ file that can be used to set the initial condition. 
+3. For ICRF_2D, inputs for coefficient pretabulation are given in input_builder.txt
+
 RUNNING:
 Instructions to run the programs are straightforward:
     cd [folder]
     tools/run.sh  
+
+OUTPUTS:
+Outputs from run and coefficient tables are in output_data file.
 
 PLOTTING:
 run.sh already automatically takes care of the plotting. Instructions to plot individual
