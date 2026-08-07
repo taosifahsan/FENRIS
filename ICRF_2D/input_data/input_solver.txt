@@ -31,7 +31,11 @@ T_e             : 1.0
 logLambda_ea    : 17.0
 
 # ---- Simulation Params ----
--dt             : 1E-2       # Size of Time steps
+-dt             : 4E-2       # Size of Time steps.  Measured optimum for the
+                             # unpreconditioned GMRES: 1.5x faster than 1e-2
+                             # with the t=2 field unchanged to 3e-5 relative;
+                             # dt=1e-1 is SLOWER (Krylov iterations grow with
+                             # dt faster than the step count falls).
 -time           : 1E2        # Total Time
 -degree         : 2          # DG polynomial degree
 -start-levels	: 6 6
