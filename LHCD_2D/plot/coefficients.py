@@ -187,16 +187,12 @@ def plot_diffusion(solver_input=None, points=256):
     vpar, vperp = x * np.cos(theta), x * np.sin(theta)
 
     fig, ax = plt.subplots(figsize=(5.8, 4.6), constrained_layout=True)
+    # Filled, not contour lines: D_ql is a near-top-hat in x_parallel, so line
+    # contours draw only its two edges and the plateau reads as empty.
     contour2d(
-        fig, ax, vpar, vperp, diffusion,
+        fig, ax, vpar, vperp, diffusion, filled=True,
         style_axes=style_cartesian_axes,
-        title=(
-            r"LHCD quasilinear coefficient $D_{ql}$"
-            "\n"
-            r"$\frac{\partial}{\partial w}"
-            r"\left(D_{ql}\frac{\partial f}{\partial w}\right)$,"
-            r"  $w=v_\parallel$"
-        ),
+        title=r"LHCD quasilinear coefficient $D_{ql}(x_\parallel)$",
     )
     return fig
 

@@ -1,28 +1,34 @@
 # Units: x = v/v_th, v_th = sqrt(2 T_e/m_e); time in collision times of that
-# v_th (see the normalization header in src/LHCD_2D.cpp).  The RF window
-# below is ALIGNED with LHCD_1D's deck (same [2, 4] window, same 0.5 height,
-# same 0.01 edge width) so the 1-D and 2-D runs drive the same physical
-# resonance.  Pre-standardization data (old v_th = sqrt(T/m), window [3,5])
-# is archived in output_data_archive_pre_standardization/.
+# v_th (see the normalization header in src/LHCD_2D.cpp).
+#
+# Under x_new = x_old/sqrt2, t_new = t_old/(2 sqrt2):
+#   lengths in x  scale by 1/sqrt2   (window bounds, smoothing_width)
+#   D ~ v^2/t     scales by  sqrt2   (cut_height)
+# The window BOUNDS are not a conversion: [2, 4] is taken from LHCD_1D so the
+# 1-D and 2-D runs drive the same resonance ([3,5] would convert to
+# [2.12, 3.54]).  Height and edge width ARE converted, so they no longer match
+# LHCD_1D's 0.5 / 0.01 -- those are old-convention numbers.
+# Pre-standardization data is in output_data_archive_pre_standardization/.
 
-cut_x_parallel_min : 2.0     # D_RF x_parallel window start
-cut_x_parallel_max : 4.0     # D_RF x_parallel window end
-cut_height      : 0.5        # D_RF peak value
+cut_x_parallel_min : 2.0     # D_RF x_parallel window start (from LHCD_1D)
+cut_x_parallel_max : 3.5     # D_RF x_parallel window end   (from LHCD_1D)
+cut_height      : 0.7	     # = 0.5 * sqrt2, same physical RF power as the
+                             # old runs (D scales by sqrt2 in these units)
 
 # Optional RF cutoff as a fraction of x_max. cut_center >= 1 disables it.
 # smoothing_width controls both the x_parallel-window edges and this cutoff.
 cut_center      : 1.0
-smoothing_width : 0.01
+smoothing_width : 0.015    # = 0.02 / sqrt2, a width in x_parallel
 
 Zi              : 1.0        # Atomic number
 
-x_max           : 8.5        # x end
+x_max           : 7.0        # x end
 
 # Crank-Nicolson time evolution.
 -step-method    : cn
 -dt             : 3.5E-3     # Size of Time steps (= the old deck's 1.E-2 in
                              # the old time unit: t_new = t_old / (2 sqrt 2))
--time           : 176.78     # Total Time (= the old runs' 5E2 converted by
+-time           : 170.0     # Total Time (= the old runs' 5E2 converted by
                              # the same factor: identical physical duration)
 
 -degree         : 2         # DG polynomial degree

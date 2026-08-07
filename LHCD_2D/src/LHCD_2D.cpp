@@ -1,23 +1,10 @@
-// ────────────────────────────────────────────────────────────────────────────
-// Normalization (standardized across all four FENRIS projects)
-// ────────────────────────────────────────────────────────────────────────────
-// velocity  x = v / v_th   with  v_th = sqrt(2 T_e / m_e)
-// time      t -> nu t      with  nu the collision frequency built from THIS
-//                          v_th (nu ~ C / v_th^3), so tau_c here is the
-//                          collision time of the sqrt(2T/m) convention
-// equilibrium               f_M ~ exp(-x^2), single-particle energy T_e x^2
+// LHCD 2-D quasilinear Fokker-Planck solver on (x, theta).
 //
-// Collision coefficients in these units:
-//   speed diffusion  D_c = 1/(4x^3)      (the -0.25 literal below)
-//   speed drag       A   = 1/(2x^2)      (the -0.5 literal below)
-//   pitch scattering nu_D = (Zi+1)/(4x^3)
-// Check: A/D_c = 2x = -d ln exp(-x^2)/dx, so the Maxwellian is stationary.
-//
-// (Before 2026-08 this project used v_th = sqrt(T/m), equilibrium
-// exp(-x_old^2/2), D_c = 1/(2 x_old^3).  The change of variables
-// x = x_old/sqrt(2), t -> t/(2 sqrt 2) maps old runs onto new ones exactly;
-// only the diffusion literal changed, drag and pitch are invariant.)
-// ────────────────────────────────────────────────────────────────────────────
+// Units: x = v/v_th, v_th = sqrt(2 T_e/m_e); time in collision times of that
+//   v_th.  Equilibrium exp(-x^2).
+// Coefficients: diffusion 1/(4x^3), drag 1/(2x^2), pitch (Zi+1)/(4x^3).
+// Boundaries: bothsides on every outermost div -> zero total flux at both
+//   walls; grads and penalties stay free.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -30,9 +17,7 @@
 #include <asgard.hpp>
 #include <asgard_pde.hpp>
 
-// The user-editable initial condition f0(x, theta): lives in input_data/
-// because it is an input, even though it is code.  See the header itself for
-// the contract.
+// User-editable f0(x, theta); lives in input_data/ because it is an input.
 #include "initial_condition.hpp"
 
 using P = asgard::default_precision;
@@ -53,10 +38,8 @@ P smooth_step(P x, P cut, P width)
     return P{1} / (P{1} + std::exp(-(x - cut) / width));
 }
 
-// LHCD quasilinear diffusion coefficient. The x_parallel window and the
-// optional high-speed x cutoff use the same smoothing
-// width. It is applied directly to x_parallel=x*cos(theta) at the window edges
-// and as a dimensionless width in x/x_max for the radial cutoff.
+// RF diffusion strength: a window in x_parallel = x cos(theta), times an
+// optional high-speed cutoff in x/x_max.  Both edges share smoothing_width.
 class LHCDDiffusion {
 public:
     P x_parallel_min, x_parallel_max, height, smoothing_width;
@@ -118,8 +101,7 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
     asgard::pde_domain<P> domain({{0.0, x_max}, {0.0, PI}});
     domain.set_names({"x", "theta"});
     
-    // setting some default options
-    // defaults are used only the corresponding values are missing from the command line
+    // Defaults; used only when the deck / command line omits the value.
     options.default_degree = 2;
     options.default_start_levels = {5, 5};
     
@@ -132,11 +114,9 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
     options.default_isolver_iterations = 1000;
     options.default_isolver_inner_iterations = 50;
     
-    // create a pde from the given options and domain
-    // we can read the variables using pde.options() and pde.domain() (both return const-refs)
-    // the option entries may have been populated or updated with default values
     asgard::pde_scheme<P> pde(options, std::move(domain));
-    // Spherical-coordinate mass M(x,theta)=x^2 sin(theta).
+
+    // Spherical mass M(x,theta) = x^2 sin(theta), and its separable factors.
     auto mass_x = [](std::vector<P> const &x, std::vector<P> &value) {
         for (std::size_t i = 0; i < x.size(); ++i)
             value[i] = x[i] * x[i];
@@ -162,21 +142,12 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
     
     // Collision terms: x components.
     {
-        // Drift term: -1/x^2 d[x^2*(-1/2x^2)f]/dx.  bothsides: the drag
-        // flux is fixed to zero at both radial walls (its boundary bracket
-        // is omitted from the operator), which together with the closed
-        // diffusive and QL fluxes below makes the wall exactly leakproof.
+        // Drag: -1/x^2 d[x^2 (-1/2x^2) f]/dx.
         pde += term_md({term_div(-0.5, asgard::flux_type::upwind,
                                  asgard::boundary_type::bothsides),
             term_identity{}});
-        
-        // Diffusion: s=1/x^2 d/dx(x^2 zeta q), D_c = 1/(4x^3) in the
-        // standard sqrt(2T/m) units (see the normalization header).
-        // (Formerly this chain carried set_*_robin(0.5), the counter-bracket
-        // to the drag term's free boundary flux x^2 A f = f/2.  With the
-        // drag term itself now bothsides, its bracket is deleted rather
-        // than cancelled -- the assembled matrix is identical, verified
-        // bit-for-bit on the 1-D solvers and to solver tolerance in 2-D.)
+
+        // Speed diffusion: 1/x^2 d/dx(x^2 D_c df/dx), D_c = 1/(4x^3).
         term_1d div_grad_x({
             term_div(-0.25, asgard::flux_type::upwind,
                      asgard::boundary_type::bothsides),
@@ -212,31 +183,12 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
         pde += term_md{{term_identity{}, penalty_th}};
     }
     
-    // =====================================================================
-    // LOWER-HYBRID QUASILINEAR DIFFUSION
-    //
-    // x_parallel=x cos(theta), so in the orthonormal spherical basis
-    //
-    //   e_parallel = cos(theta) e_x - sin(theta) e_theta,
-    //
-    // and D_orth = D_ql e_parallel e_parallel^T.  After multiplying by the
-    // spherical mass M=x^2 sin(theta), the conservative coefficient matrix is
-    //
-    //   K = D_ql [ x^2 sin(theta) cos^2(theta),
-    //             -x sin^2(theta) cos(theta);
-    //             -x sin^2(theta) cos(theta),
-    //              sin^3(theta) ].
-    //
-    // Every K_ij is separable apart from the common scalar D_ql(v cos theta).
-    // Put the separable K_ij directly inside Grad_j and interpolate only the
-    // common D_ql scalar.  This is the multidimensional Grad[q] construction:
-    // the outer
-    // divergence receives the global M^{-1}, while term_interp introduces no
-    // additional mass operation.
-    // =====================================================================
-    // D_ql(v cos(theta)) is the only non-separable interpolated coefficient.
-    // Its evaluation is just a few arithmetic operations, so evaluate it
-    // directly instead of maintaining a node hash and value cache.
+    // ---- Lower-hybrid quasilinear diffusion -----------------------------
+    // D = D_ql e_par e_par^T with e_par = cos(theta) e_x - sin(theta) e_th.
+    // Times the mass M, the coefficient matrix is
+    //   K = D_ql [ x^2 s c^2, -x s^2 c ; -x s^2 c, s^3 ]   (s=sin, c=cos),
+    // whose entries are all separable apart from the scalar D_ql.  So each
+    // K_ij goes inside its Grad_j and only D_ql is interpolated.
     auto D_adapt = [diffusion_coefficient](
                     P, asgard::vector2d<P> const &nodes,
                     std::vector<P> const &f, std::vector<P> &value) {
@@ -259,28 +211,11 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
         }
     };
 
-    // Plain conservative divergences. The PDE mass applies
-    // 1/(x^2 sin(theta)) to the completed flux divergence.
-    // bc::bothsides closes the QL flux at the domain edges.  Required
-    // together with the drag and diffusion brackets above being closed
-    // (bothsides on both collisional terms).  The RF window is a
-    // band in x_parallel, so it is still LIVE on part of the outer wall --
-    // at x = x_max the resonance sits at cos(theta) = x_par/x, e.g. D_ql =
-    // 0.5 at theta ~ 68 deg for x_max = 8.5 -- and cut_center >= 1 leaves it
-    // unattenuated.  If left as bc::none (outflow), that flux simply escapes.
-    //
-    // Zeroing BOTH components is what makes the edge condition tractable:
-    // D_ql = D_w e_par e_par^T is rank-1, so vanishing in both directions
-    // forces e_par.grad(f) = 0 and the QL flux drops out entirely, leaving
-    // the purely collisional B df/dx + A f = 0.  That relation is not a term
-    // in the operator: it is what the sealed drag and diffusion brackets
-    // above impose between them, since only their SUM is constrained to
-    // vanish at the wall.  Otherwise Gamma_x couples df/dtheta and no scalar
-    // edge condition exists.
-    // (ICRF_2D carries the same fix; see its longer note there for the
-    // measured failure modes -- Neumann manufactures particles, and the
-    // collisional condition alone, back when it was written as an explicit
-    // Robin, bleeds them.)
+    // Conservative divergences; the PDE mass supplies 1/(x^2 sin theta).
+    // bothsides on BOTH components: the RF window is still live on part of
+    // the outer wall, and zeroing both kills the rank-1 QL flux entirely,
+    // leaving the collisional B df/dx + A f = 0 that the sealed drag and
+    // diffusion impose between them.  Left open, that flux escapes.
     term_md div_x({
         term_div{P{-1.0}, asgard::flux_type::upwind,
                  asgard::boundary_type::bothsides},
@@ -342,17 +277,10 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
     pde += term_md({div_theta, diffusion, grad_K_thetax});
     pde += term_md({div_theta, diffusion, grad_K_thetatheta});
 
-    // initial condition f(0,x,theta) = f_0(x,theta), user-supplied as the
-    // (fully 2-D, non-separable allowed) lambda in
-    // input_data/initial_condition.hpp -- a compile input: editing it
-    // triggers a rebuild and a re-solve through the normal CMake staleness
-    // rules.
+    // Initial condition from input_data/initial_condition.hpp, normalized so
+    // 2 pi * integral f0 x^2 sin(theta) dx dtheta = 1 (a 3-D distribution).
+    // 2-D composite Simpson; both integrands are smooth.
     {
-        // Normalize numerically as a 3-D velocity distribution:
-        // 2 pi * integral f0 x^2 sin(theta) dx dtheta = 1, so the default
-        // Maxwellian shape reproduces the old hard-coded (2 pi)^{-3/2}
-        // prefactor exactly.  Composite 2-D Simpson: milliseconds, and both
-        // integrands here are smooth.
         P norm = 0;
         {
             int const nx = 2048, nth = 1024;  // intervals; even, per Simpson
@@ -375,10 +303,7 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
                     "initial_condition.hpp: 2 pi * integral of "
                     "f0 x^2 sin(theta) must be positive and finite");
         }
-        // Unlike the old separable path (which projected mass-weighted
-        // values against the local mass matrices), the non-separable initial
-        // condition goes through asgard's interpolation machinery, which
-        // collocates the function *itself* -- so supply plain f0, no
+        // Interpolation collocates the function itself: pass plain f0, no
         // Jacobian.
         pde.set_initial([norm](P, asgard::vector2d<P> const &nodes,
                                std::vector<P> &fx) {
@@ -391,14 +316,8 @@ asgard::pde_scheme<P> make(asgard::prog_opts options)
 }
 
 int main(int argc, char** argv){
-    // if MPI is enabled, call MPI_Init(), otherwise do nothing
     asgard::libasgard_runtime running_(argc, argv);
-    
-    // if double precision is available the P is double
-    // otherwise P is float
     using P = asgard::default_precision;
-    
-    // parse the command-line inputs
     asgard::prog_opts options(argc, argv);
 
     if (options.show_help) {
@@ -413,8 +332,6 @@ int main(int argc, char** argv){
         return 0;
     }
 
-    // the discretization_manager takes in a pde and handles sparse-grid construction
-    // separable and non-separable operators, holds the current state, etc.
     asgard::discretization_manager<P> disc(make(options),
                                            asgard::verbosity_level::high);
 

@@ -4,16 +4,18 @@
 #include <iostream>
 #include <sstream>
 
+// LHCD 1-D quasilinear Fokker-Planck solver on v (Cartesian, no mass).
+//
+// Solves  df/dt = d/dv[ A(v) df/dv + B(v) f ],  A = D_RF + I^3/2, B = -I^2,
+//   with I(v) a regularized 1/v and D_RF a window in v.
+// Boundaries: bothsides on both divs -> zero total flux at both walls.
 #include "asgard.hpp"
 
-// The user-editable initial condition f0(v): lives in input_data/ because it
-// is an input, even though it is code.  See the header itself for the contract.
+// User-editable f0(v); lives in input_data/ because it is an input.
 #include "initial_condition.hpp"
 
-// Use ASGarD's default precision (typically double)
 using P = asgard::default_precision;
 
-// Convenient aliases for common ASGarD types
 using disc_manager = asgard::discretization_manager<P>;
 using pde_scheme = asgard::pde_scheme<P>;
 using term_1d = asgard::term_1d<P>;
@@ -33,29 +35,23 @@ using asgard::right_boundary_flux;
 using asgard::left_boundary_flux;
 // using asgard::ignores_time;
 
-// ───────────────────────────────────────
-// Utility Class for Diffusion Coefficient
-// ───────────────────────────────────────
-
+// RF diffusion strength: a smoothed window [min, max] of height `height`.
 class diffusion_params{
 public:
     P min, max, sharpness, height;
-    // Value of the function
     P val(P const &v) const{
         return height * step(v - min) * step(max - v);
     }
-    // step function
     P step(P const &v) const{
         return sharpness != 0.0 ? 1/(1 + exp(-v/sharpness)) : v > 0;
     }
 };
 
-// sign function
 inline P sign(P const &v) {
     return v > 0 ? 1 : - 1;
 }
 
-// Regularizer of 1/v
+// Regularized 1/v: softened near zero, clamped outside [inv_min, inv_max].
 class inverse_params{
 public:
     P eps, inv_min, inv_max;
@@ -73,13 +69,8 @@ public:
     }
 };
 
-// ──────────────────────────────
-// PDE Constuction
-// ──────────────────────────────
-
 pde_scheme make_pde(asgard::prog_opts options)
 {
-    // Read parameters
     diffusion_params D{
         options.file_required<P>("cut_min"),
         options.file_required<P>("cut_max"),
@@ -95,7 +86,6 @@ pde_scheme make_pde(asgard::prog_opts options)
     options.default_degree = 1;
     options.default_start_levels = {8, };
 
-    // Setting domain conditional on side
     pde_domain domain({{
         options.file_required<P>("domain_min"),
         options.file_required<P>("domain_max")
@@ -103,7 +93,6 @@ pde_scheme make_pde(asgard::prog_opts options)
 
     P const dx = domain.min_cell_size(options.max_level());
 
-    // Set solver method
     options.default_step_method = asgard::time_method::cn;
     options.default_solver = asgard::solver_method::gmres;
     options.default_precon = asgard::precon_method::none;
@@ -112,12 +101,9 @@ pde_scheme make_pde(asgard::prog_opts options)
     options.default_isolver_iterations = 1000;
     options.default_isolver_inner_iterations = 400;
 
-    // Declaring the PDE
     pde_scheme pde(options, std::move(domain));
 
-    // Adaptive-grid weight, mirroring LHCD_2D's D_adapt exactly: refine
-    // where the RF diffusion coefficient is large and the solution is
-    // present.
+    // Adaptivity weight: refine where RF diffusion is strong and f is present.
     auto D_adapt = [=](P, asgard::vector2d<P> const &nodes,
                        std::vector<P> const &f, std::vector<P> &value) {
         for (std::int64_t i = 0; i < nodes.num_strips(); ++i) {
@@ -127,14 +113,9 @@ pde_scheme make_pde(asgard::prog_opts options)
     };
     pde.set_adapt_weight(D_adapt);
 
-    {// First term -d/dv (A(v) * df/dv)
-
-        // A(v) is a plain function of the single coordinate, so it belongs
-        // directly inside the div as a separable coefficient -- the same
-        // div-grad chain construction the ICRF solvers use.  (The original
-        // routed it through term_interp, which exists for coefficients that
-        // cannot be written separably; in 1-D nothing qualifies, and the
-        // interpolation pass only added cost and interpolation error.)
+    // Diffusion: -d/dv(A(v) df/dv).  A is separable in the one coordinate,
+    // so it sits inside the div rather than going through term_interp.
+    {
         auto negA = [=](const vector &v, vector &func) {
             for (size_t i = 0; i < v.size(); ++i)
                 func[i] = -sign(v[i])
@@ -150,32 +131,21 @@ pde_scheme make_pde(asgard::prog_opts options)
         pde += term_md{ term_penalty{1/dx}, };
     }
 
-    {// Second term -d/dv (B * f)
-
+    // Drag: -d/dv(B(v) f).
+    {
         auto B = [=](const vector &v, vector &func) {
             for (size_t i = 0; i < v.size(); ++i)
                 func[i] =  -sign(v[i]) * pow(I.val(v[i]), 2);
         };
-        
-        // bothsides: the advective flux is fixed to zero at both walls.
-        // Previously this bracket was left free with no cancelling Robin --
-        // a latent leak, benign only because f(+-v_max) is tiny; the same
-        // defect class caused the 2-D projects' particle drift.
+
         term_md Bdiv{term_div(B, boundary_type::bothsides),};
         pde += term_md({Bdiv});
 
     }
 
-    // initial condition f(0,v) = f_0(v), user-supplied as the lambda in
-    // input_data/initial_condition.hpp (a compile input: editing it triggers
-    // a rebuild and a re-solve through the normal CMake staleness rules).
+    // Initial condition from input_data/initial_condition.hpp, normalized by
+    // composite Simpson so integral f0 dv = 1 over the actual domain.
     {
-        // Normalize numerically so integral f_0 dv = 1 over the actual
-        // domain, whatever shape the lambda returns (composite Simpson;
-        // microseconds).  Diagnostics divide by N(0) and the plotters
-        // renormalize, so this changes no downstream figure -- it only fixes
-        // the absolute scale that the old hard-coded exp(-v^2) left at
-        // sqrt(pi).
         P const v_lo = options.file_required<P>("domain_min");
         P const v_hi = options.file_required<P>("domain_max");
         P norm = 0;
@@ -201,27 +171,17 @@ pde_scheme make_pde(asgard::prog_opts options)
         pde.add_initial(separable_func({init}));
     }
 
-    // df/dt - d/dv (A(v) * df/dv + B(v) * f) = 0
     return pde;
 }
 
-// ──────────────────────────────
-// Main Execution:
-// ──────────────────────────────
-
 int main(int argc, char **argv)
 {
-    // Parse options from CLI or config file
     asgard::prog_opts options(argc, argv);
-
-    // Construct PDE and discretization manager
     disc_manager disc(make_pde(options), verbosity_level::high);
 
-    // Movie snapshots: same deck keys and file layout as the 2D solvers --
-    // separate per-frame .h5 files under movie_dir, replacing the old scheme
-    // of aux fields accumulated inside one file.  movie_frames spreads
-    // roughly that many snapshots over the run (including initial and final);
-    // movie_stride overrides it when positive; both zero disables snapshots.
+    // Movie snapshots: one .h5 per frame under movie_dir.  movie_frames
+    // spreads roughly that many over the run; movie_stride overrides it;
+    // both zero disables snapshots.
     int movie_stride = options.file_value<int>("movie_stride").value_or(0);
     int const movie_frames = options.file_value<int>("movie_frames").value_or(0);
     std::string const movie_dir = options.file_value<std::string>("movie_dir").value_or("movie");
